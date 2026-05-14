@@ -1,6 +1,7 @@
 import { query, transaction } from "#shared/database/mysql";
 import { deliverSalesOrder } from "#modules/sales-orders/sales-orders.delivery";
 import { AppError } from "#shared/utils/app-error";
+import { allocateDocumentNumber } from "#shared/utils/document-sequences";
 
 export class DeliveriesRepository {
   async findPaginated(tenantId, { page, perPage, search, status, salesOrderId, dateFrom, dateTo }) {
@@ -325,12 +326,35 @@ export class DeliveriesRepository {
 
   async createWithLinks(deliveryData, links) {
     return transaction(async (tx) => {
+      let effectiveBranchId = deliveryData.branchId ? Number(deliveryData.branchId) : null;
+      if (!effectiveBranchId) {
+        const [branchRows] = await tx.execute(
+          `
+            SELECT id
+            FROM branches
+            WHERE tenant_id = ?
+              AND is_primary = 1
+            LIMIT 1
+          `,
+          [Number(deliveryData.tenantId)]
+        );
+        effectiveBranchId = branchRows[0]?.id ? Number(branchRows[0].id) : null;
+      }
+
+      const deliveryNumber = deliveryData.deliveryNumber || await allocateDocumentNumber({
+        tenantId: deliveryData.tenantId,
+        branchId: effectiveBranchId,
+        documentType: "delivery",
+        at: deliveryData.deliveryDate,
+        tx
+      });
+
       const [dResult] = await tx.execute(`
         INSERT INTO deliveries (
           tenant_id, branch_id, delivery_number, driver_id, truck_id, delivery_date, status, notes, created_ip, updated_ip
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [
-        deliveryData.tenantId, deliveryData.branchId || null, deliveryData.deliveryNumber, deliveryData.driverId || null,
+        deliveryData.tenantId, effectiveBranchId, deliveryNumber, deliveryData.driverId || null,
         deliveryData.truckId || null, deliveryData.deliveryDate, deliveryData.status || 'pending',
         deliveryData.notes || null, deliveryData.createdIp || null, deliveryData.updatedIp || null
       ]);

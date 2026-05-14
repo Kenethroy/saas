@@ -8,6 +8,7 @@ import {
   updateSalesOrderStatusSchema
 } from "#modules/sales-orders/sales-orders.validator";
 import { authenticate } from "#shared/middleware/auth.middleware";
+import { resolveBranch } from "#shared/middleware/branch-context.middleware";
 import { requirePermission } from "#shared/middleware/permission.middleware";
 import { validateRequest } from "#shared/middleware/validate-request.middleware";
 
@@ -17,6 +18,7 @@ const controller = new SalesOrdersController();
 router.get(
   "/for-delivery-selection",
   authenticate,
+  resolveBranch,
   requirePermission("salesOrders.view"),
   controller.listForDeliverySelection
 );
@@ -24,6 +26,7 @@ router.get(
 router.get(
   "/",
   authenticate,
+  resolveBranch,
   requirePermission("salesOrders.view"),
   validateRequest(listSalesOrdersSchema, "query"),
   controller.list
@@ -32,6 +35,7 @@ router.get(
 router.get(
   "/:id",
   authenticate,
+  resolveBranch,
   requirePermission("salesOrders.view"),
   validateRequest(salesOrderParamsSchema, "params"),
   controller.getById
@@ -40,6 +44,7 @@ router.get(
 router.get(
   "/:id/invoice/pdf",
   authenticate,
+  resolveBranch,
   requirePermission("salesOrders.view"),
   validateRequest(salesOrderParamsSchema, "params"),
   controller.invoicePdf
@@ -48,6 +53,7 @@ router.get(
 router.patch(
   "/:id",
   authenticate,
+  resolveBranch,
   requirePermission("salesOrders.update"),
   validateRequest(salesOrderParamsSchema, "params"),
   validateRequest(updateSalesOrderSchema),
@@ -57,6 +63,7 @@ router.patch(
 router.patch(
   "/:id/status",
   authenticate,
+  resolveBranch,
   requirePermission("salesOrders.update"),
   validateRequest(salesOrderParamsSchema, "params"),
   validateRequest(updateSalesOrderStatusSchema),
@@ -66,6 +73,7 @@ router.patch(
 router.post(
   "/create",
   authenticate,
+  resolveBranch,
   requirePermission("salesOrders.create"),
   validateRequest(createSalesOrderSchema),
   controller.create

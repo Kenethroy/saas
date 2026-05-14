@@ -12,7 +12,8 @@ export class PaymentsController {
   list = async (req, res, next) => {
     try {
       const result = await this.service.list(req.query, {
-        tenantId: req.auth?.user?.tenantId ?? null
+        tenantId: req.auth?.user?.tenantId ?? null,
+        branchId: req.auth?.branch?.id ?? null
       });
       res.status(200).json(successResponse({
         message: "Payments retrieved successfully",
@@ -28,6 +29,7 @@ export class PaymentsController {
     try {
       const data = await this.service.createCustomerPayment(req.body, {
         tenantId: req.auth?.user?.tenantId ?? null,
+        branchId: req.auth?.branch?.id ?? null,
         ipAddress: getPersistedRequestIp(req),
         fileUrl: req.uploadedFileUrl ?? null,
         userId: req.auth?.user?.id ?? null
@@ -46,6 +48,7 @@ export class PaymentsController {
     try {
       const data = await this.service.createSupplierPayment(req.body, {
         tenantId: req.auth?.user?.tenantId ?? null,
+        branchId: req.auth?.branch?.id ?? null,
         ipAddress: getPersistedRequestIp(req),
         fileUrl: req.uploadedFileUrl ?? null,
         userId: req.auth?.user?.id ?? null
@@ -64,7 +67,8 @@ export class PaymentsController {
     try {
       const id = Number(req.params.id);
       const data = await this.service.getAccountsPayableHistory(id, {
-        tenantId: req.auth?.user?.tenantId ?? null
+        tenantId: req.auth?.user?.tenantId ?? null,
+        branchId: req.auth?.branch?.id ?? null
       });
       res.status(200).json(successResponse({
         message: "Accounts payable payment history retrieved successfully",

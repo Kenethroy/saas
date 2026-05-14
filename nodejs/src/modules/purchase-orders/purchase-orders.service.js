@@ -1,23 +1,27 @@
 import { purchaseOrdersRepository } from "#modules/purchase-orders/purchase-orders.repository";
 import { createPurchaseOrderPdf } from "#modules/purchase-orders/purchase-order-pdf";
 import { AppError } from "#shared/utils/app-error";
+import { allocateDocumentNumber } from "#shared/utils/document-sequences";
 
 export const purchaseOrdersService = {
-  async getAllPurchaseOrders(filters) {
+  async getAllPurchaseOrders(tenantId, filters) {
+    if (!tenantId) throw new AppError("Tenant context is required", 400);
     const {
       page = 1,
       perPage,
       limit = perPage ?? 10,
       search,
       status,
-      supplierId
+      supplierId,
+      branchId: filters.branchId ?? null
     } = filters;
-    const { items, total } = await purchaseOrdersRepository.findPaginated({
+    const { items, total } = await purchaseOrdersRepository.findPaginated(tenantId, {
       page,
       limit,
       search,
       status,
-      supplierId
+      supplierId,
+      branchId
     });
 
     return {
@@ -35,14 +39,15 @@ export const purchaseOrdersService = {
     };
   },
 
-  async getPurchaseOrderById(id) {
-    const po = await purchaseOrdersRepository.findById(id);
+  async getPurchaseOrderById(tenantId, id) {
+    if (!tenantId) throw new AppError("Tenant context is required", 400);
+    const po = await purchaseOrdersRepository.findById(tenantId, id);
     if (!po) throw new AppError("Purchase Order not found", 404);
     return po;
   },
 
-  async createPdfDocument(id) {
-    const purchaseOrder = await this.getPurchaseOrderById(id);
+  async createPdfDocument(tenantId, id) {
+    const purchaseOrder = await this.getPurchaseOrderById(tenantId, id);
     const buffer = await createPurchaseOrderPdf(purchaseOrder);
 
     return {
@@ -52,24 +57,25 @@ export const purchaseOrdersService = {
   },
 
   async createPurchaseOrder(data, context) {
+    const tenantId = context?.tenantId;
+    if (!tenantId) throw new AppError("Tenant context is required", 400);
+    const branchId = context?.branchId ?? null;
     const { clientIp } = context;
-    const supplier = await purchaseOrdersRepository.findSupplierById(data.supplierId);
+    const supplier = await purchaseOrdersRepository.findSupplierById(tenantId, data.supplierId);
     if (!supplier) throw new AppError("Supplier not found or inactive", 404);
 
     const variantIds = data.items.map(item => item.productVariantId);
-    const variants = await purchaseOrdersRepository.findProductVariantsByIds(variantIds);
+    const variants = await purchaseOrdersRepository.findProductVariantsByIds(tenantId, variantIds);
     if (variants.length !== variantIds.length) {
       throw new AppError("One or more product variants not found or inactive", 400);
     }
 
-    // Generate PO Number
-    const latestPo = await purchaseOrdersRepository.findLatestOrder();
-    let nextNum = 1;
-    if (latestPo && latestPo.poNumber) {
-      const match = latestPo.poNumber.match(/PO-(\d+)/);
-      if (match) nextNum = parseInt(match[1], 10) + 1;
-    }
-    const poNumber = `PO-${String(nextNum).padStart(6, "0")}`;
+    const poNumber = await allocateDocumentNumber({
+      tenantId,
+      branchId,
+      documentType: "purchase_order",
+      at: new Date(data.orderDate)
+    });
 
     // Process items
     let itemsSubtotal = 0;
@@ -93,6 +99,7 @@ export const purchaseOrdersService = {
     });
 
     const poData = {
+      branchId,
       poNumber,
       supplierId: data.supplierId,
       orderDate: new Date(data.orderDate),
@@ -106,20 +113,22 @@ export const purchaseOrdersService = {
       status: 'pending'
     };
 
-    return await purchaseOrdersRepository.createWithItems(poData, orderItems);
+    return await purchaseOrdersRepository.createWithItems(tenantId, poData, orderItems);
   },
 
   async updatePurchaseOrder(id, data, context) {
+    const tenantId = context?.tenantId;
+    if (!tenantId) throw new AppError("Tenant context is required", 400);
     const { clientIp } = context;
-    const po = await purchaseOrdersRepository.findById(id);
+    const po = await purchaseOrdersRepository.findById(tenantId, id);
     if (!po) throw new AppError("Purchase Order not found", 404);
     if (po.status !== "pending") throw new AppError(`Cannot update purchase order with status ${po.status}`, 400);
 
-    const supplier = await purchaseOrdersRepository.findSupplierById(data.supplierId);
+    const supplier = await purchaseOrdersRepository.findSupplierById(tenantId, data.supplierId);
     if (!supplier) throw new AppError("Supplier not found or inactive", 404);
 
     const variantIds = data.items.map(item => item.productVariantId);
-    const variants = await purchaseOrdersRepository.findProductVariantsByIds(variantIds);
+    const variants = await purchaseOrdersRepository.findProductVariantsByIds(tenantId, variantIds);
     if (variants.length !== variantIds.length) {
       throw new AppError("One or more product variants not found or inactive", 400);
     }
@@ -156,41 +165,47 @@ export const purchaseOrdersService = {
       updatedIp: clientIp
     };
 
-    return await purchaseOrdersRepository.updateWithItems(id, updateData, orderItems);
+    return await purchaseOrdersRepository.updateWithItems(tenantId, id, updateData, orderItems);
   },
 
   async updatePurchaseOrderStatus(id, status, context) {
+    const tenantId = context?.tenantId;
+    if (!tenantId) throw new AppError("Tenant context is required", 400);
     const { clientIp } = context;
-    const po = await purchaseOrdersRepository.findById(id);
+    const po = await purchaseOrdersRepository.findById(tenantId, id);
     if (!po) throw new AppError("Purchase Order not found", 404);
 
     if (po.status === status) return po;
 
-    return await purchaseOrdersRepository.updateStatus(id, status, clientIp);
+    return await purchaseOrdersRepository.updateStatus(tenantId, id, status, clientIp);
   },
 
   async receivePurchaseOrder(id, grnPayload, context) {
+    const tenantId = context?.tenantId;
+    if (!tenantId) throw new AppError("Tenant context is required", 400);
     const { clientIp, userId } = context;
-    const po = await purchaseOrdersRepository.findById(id);
+    const po = await purchaseOrdersRepository.findById(tenantId, id);
     if (!po) throw new AppError("Purchase Order not found", 404);
 
     if (po.status !== "approved") {
       throw new AppError("Purchase order must be approved before it can be received", 400);
     }
 
-    return purchaseOrdersRepository.receivePurchaseOrder(id, po, grnPayload, context);
+    return purchaseOrdersRepository.receivePurchaseOrder(tenantId, id, po, grnPayload, context);
   },
 
   async deletePurchaseOrder(id, context) {
+    const tenantId = context?.tenantId;
+    if (!tenantId) throw new AppError("Tenant context is required", 400);
     const { clientIp } = context;
-    const po = await purchaseOrdersRepository.findById(id);
+    const po = await purchaseOrdersRepository.findById(tenantId, id);
     if (!po) throw new AppError("Purchase Order not found", 404);
 
     if (po.status === "received" || po.status === "approved") {
       throw new AppError(`Cannot delete purchase order with status ${po.status}`, 400);
     }
 
-    await purchaseOrdersRepository.softDelete(id, clientIp);
+    await purchaseOrdersRepository.softDelete(tenantId, id, clientIp);
     return { success: true, message: "Purchase order deleted successfully" };
   }
 };

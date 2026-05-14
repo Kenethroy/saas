@@ -129,8 +129,9 @@ function normalizeRecurringPayload(payload) {
 }
 
 export const businessExpensesService = {
-  async listCategories(filters = {}) {
-    const categories = await businessExpensesRepository.findCategories(filters);
+  async listCategories(tenantId, filters = {}) {
+    if (!tenantId) throw new AppError("Tenant context is required", 400);
+    const categories = await businessExpensesRepository.findCategories(tenantId, filters);
     const byId = new Map(categories.map((record) => [record.id, normalizeCategory(record)]));
     const roots = [];
 
@@ -145,18 +146,20 @@ export const businessExpensesService = {
     return roots;
   },
 
-  async listExpenses(filters) {
+  async listExpenses(tenantId, filters, context = {}) {
+    if (!tenantId) throw new AppError("Tenant context is required", 400);
     const page = filters.page ?? 1;
     const limit = filters.limit ?? 15;
     const skip = (page - 1) * limit;
 
-    const result = await businessExpensesRepository.listExpenses({
+    const result = await businessExpensesRepository.listExpenses(tenantId, {
       search: filters.search,
       status: filters.status,
       categoryId: filters.categoryId,
       paymentMethod: filters.paymentMethod,
       dateFrom: filters.dateFrom ? startOfDay(filters.dateFrom) : undefined,
       dateTo: filters.dateTo ? endOfDay(filters.dateTo) : undefined,
+      branchId: context.branchId ?? null,
       skip,
       take: limit
     });
@@ -172,8 +175,9 @@ export const businessExpensesService = {
     };
   },
 
-  async getExpenseById(id) {
-    const expense = await businessExpensesRepository.findExpenseById(id);
+  async getExpenseById(tenantId, id) {
+    if (!tenantId) throw new AppError("Tenant context is required", 400);
+    const expense = await businessExpensesRepository.findExpenseById(tenantId, id);
     if (!expense) {
       throw new AppError("Business expense not found", 404);
     }
@@ -182,12 +186,15 @@ export const businessExpensesService = {
   },
 
   async createExpense(payload, context = {}) {
-    const category = await businessExpensesRepository.findCategoryById(payload.categoryId);
+    const tenantId = context.tenantId ?? null;
+    if (!tenantId) throw new AppError("Tenant context is required", 400);
+    const category = await businessExpensesRepository.findCategoryById(tenantId, payload.categoryId);
     if (!category) {
       throw new AppError("Expense category not found", 404);
     }
 
-    return businessExpensesRepository.createExpense({
+    return businessExpensesRepository.createExpense(tenantId, {
+      branchId: context.branchId ?? null,
       categoryId: Number(payload.categoryId),
       amount: Number(payload.amount),
       expenseDate: payload.expenseDate,
@@ -203,20 +210,21 @@ export const businessExpensesService = {
     });
   },
 
-  async updateExpense(id, payload, context = {}) {
-    const existing = await businessExpensesRepository.findExpenseById(id);
+  async updateExpense(tenantId, id, payload, context = {}) {
+    if (!tenantId) throw new AppError("Tenant context is required", 400);
+    const existing = await businessExpensesRepository.findExpenseById(tenantId, id);
     if (!existing) {
       throw new AppError("Business expense not found", 404);
     }
 
     if (payload.categoryId !== undefined) {
-      const category = await businessExpensesRepository.findCategoryById(payload.categoryId);
+      const category = await businessExpensesRepository.findCategoryById(tenantId, payload.categoryId);
       if (!category) {
         throw new AppError("Expense category not found", 404);
       }
     }
 
-    return businessExpensesRepository.updateExpense(id, {
+    return businessExpensesRepository.updateExpense(tenantId, id, {
       ...(payload.categoryId !== undefined ? { categoryId: Number(payload.categoryId) } : {}),
       ...(payload.amount !== undefined ? { amount: Number(payload.amount) } : {}),
       ...(payload.expenseDate !== undefined ? { expenseDate: payload.expenseDate } : {}),
@@ -226,26 +234,30 @@ export const businessExpensesService = {
       ...(payload.referenceNumber !== undefined ? { referenceNumber: payload.referenceNumber ?? null } : {}),
       ...(payload.attachmentUrl !== undefined ? { attachmentUrl: payload.attachmentUrl ?? null } : {}),
       ...(payload.status !== undefined ? { status: payload.status } : {}),
+      ...(context.branchId ? { branchId: context.branchId } : {}),
       updatedIp: context.ipAddress ?? null
     });
   },
 
-  async deleteExpense(id, context = {}) {
-    const existing = await businessExpensesRepository.findExpenseById(id);
+  async deleteExpense(tenantId, id, context = {}) {
+    if (!tenantId) throw new AppError("Tenant context is required", 400);
+    const existing = await businessExpensesRepository.findExpenseById(tenantId, id);
     if (!existing) {
       throw new AppError("Business expense not found", 404);
     }
 
-    await businessExpensesRepository.updateExpense(id, {
+    await businessExpensesRepository.updateExpense(tenantId, id, {
       deleteFlag: true,
       updatedIp: context.ipAddress ?? null
     });
   },
 
-  async getSummary() {
+  async getSummary(tenantId, context = {}) {
+    if (!tenantId) throw new AppError("Tenant context is required", 400);
     const weekRange = getCurrentWeekRange();
     const monthRange = getCurrentMonthRange();
-    return businessExpensesRepository.summarizeExpenses({
+    return businessExpensesRepository.summarizeExpenses(tenantId, {
+      branchId: context.branchId ?? null,
       weekStart: weekRange.start,
       weekEnd: weekRange.end,
       monthStart: monthRange.start,
@@ -253,12 +265,14 @@ export const businessExpensesService = {
     });
   },
 
-  async listRecurringExpenses(filters = {}) {
-    return businessExpensesRepository.listRecurringExpenses(filters);
+  async listRecurringExpenses(tenantId, filters = {}) {
+    if (!tenantId) throw new AppError("Tenant context is required", 400);
+    return businessExpensesRepository.listRecurringExpenses(tenantId, filters);
   },
 
-  async getRecurringExpenseById(id) {
-    const recurring = await businessExpensesRepository.findRecurringExpenseById(id);
+  async getRecurringExpenseById(tenantId, id) {
+    if (!tenantId) throw new AppError("Tenant context is required", 400);
+    const recurring = await businessExpensesRepository.findRecurringExpenseById(tenantId, id);
     if (!recurring) {
       throw new AppError("Recurring expense not found", 404);
     }
@@ -267,13 +281,15 @@ export const businessExpensesService = {
   },
 
   async createRecurringExpense(payload, context = {}) {
-    const category = await businessExpensesRepository.findCategoryById(payload.categoryId);
+    const tenantId = context.tenantId ?? null;
+    if (!tenantId) throw new AppError("Tenant context is required", 400);
+    const category = await businessExpensesRepository.findCategoryById(tenantId, payload.categoryId);
     if (!category) {
       throw new AppError("Expense category not found", 404);
     }
 
     const normalizedPayload = normalizeRecurringPayload(payload);
-    return businessExpensesRepository.createRecurringExpense({
+    return businessExpensesRepository.createRecurringExpense(tenantId, {
       ...normalizedPayload,
       nextRunDate: computeNextRunDate(normalizedPayload),
       createdBy: context.userId ?? null,
@@ -282,8 +298,9 @@ export const businessExpensesService = {
     });
   },
 
-  async updateRecurringExpense(id, payload, context = {}) {
-    const existing = await businessExpensesRepository.findRecurringExpenseById(id);
+  async updateRecurringExpense(tenantId, id, payload, context = {}) {
+    if (!tenantId) throw new AppError("Tenant context is required", 400);
+    const existing = await businessExpensesRepository.findRecurringExpenseById(tenantId, id);
     if (!existing) {
       throw new AppError("Recurring expense not found", 404);
     }
@@ -301,25 +318,26 @@ export const businessExpensesService = {
       isActive: payload.isActive ?? existing.isActive
     });
 
-    const category = await businessExpensesRepository.findCategoryById(mergedPayload.categoryId);
+    const category = await businessExpensesRepository.findCategoryById(tenantId, mergedPayload.categoryId);
     if (!category) {
       throw new AppError("Expense category not found", 404);
     }
 
-    return businessExpensesRepository.updateRecurringExpense(id, {
+    return businessExpensesRepository.updateRecurringExpense(tenantId, id, {
       ...mergedPayload,
       nextRunDate: computeNextRunDate(mergedPayload),
       updatedIp: context.ipAddress ?? null
     });
   },
 
-  async deleteRecurringExpense(id, context = {}) {
-    const existing = await businessExpensesRepository.findRecurringExpenseById(id);
+  async deleteRecurringExpense(tenantId, id, context = {}) {
+    if (!tenantId) throw new AppError("Tenant context is required", 400);
+    const existing = await businessExpensesRepository.findRecurringExpenseById(tenantId, id);
     if (!existing) {
       throw new AppError("Recurring expense not found", 404);
     }
 
-    await businessExpensesRepository.updateRecurringExpense(id, {
+    await businessExpensesRepository.updateRecurringExpense(tenantId, id, {
       deleteFlag: true,
       isActive: false,
       nextRunDate: null,

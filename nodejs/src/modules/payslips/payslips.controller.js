@@ -9,7 +9,8 @@ export class PayslipsController {
 
   list = async (req, res, next) => {
     try {
-      const result = await this.service.list(req.query);
+      const tenantId = req.auth?.user?.tenantId ?? null;
+      const result = await this.service.list(tenantId, req.query);
       res.status(200).json(successResponse({
         message: "Payslips retrieved successfully",
         data: result.data,
@@ -22,7 +23,8 @@ export class PayslipsController {
 
   show = async (req, res, next) => {
     try {
-      const payslip = await this.service.show(req.params.id);
+      const tenantId = req.auth?.user?.tenantId ?? null;
+      const payslip = await this.service.show(tenantId, req.params.id);
       if (!payslip) {
         return res.status(404).json({ message: "Payslip not found" });
       }
@@ -38,6 +40,7 @@ export class PayslipsController {
   create = async (req, res, next) => {
     try {
       const payslip = await this.service.create(req.body, {
+        tenantId: req.auth?.user?.tenantId ?? null,
         ipAddress: getPersistedRequestIp(req),
         userId: req.auth?.user?.id ?? null
       });
@@ -52,7 +55,8 @@ export class PayslipsController {
 
   update = async (req, res, next) => {
     try {
-      const payslip = await this.service.update(req.params.id, req.body, {
+      const tenantId = req.auth?.user?.tenantId ?? null;
+      const payslip = await this.service.update(tenantId, req.params.id, req.body, {
         ipAddress: getPersistedRequestIp(req),
         userId: req.auth?.user?.id ?? null
       });
@@ -67,7 +71,8 @@ export class PayslipsController {
 
   delete = async (req, res, next) => {
     try {
-      await this.service.delete(req.params.id, {
+      const tenantId = req.auth?.user?.tenantId ?? null;
+      await this.service.delete(tenantId, req.params.id, {
         ipAddress: getPersistedRequestIp(req),
         userId: req.auth?.user?.id ?? null
       });
@@ -82,7 +87,8 @@ export class PayslipsController {
 
   pdf = async (req, res, next) => {
     try {
-      const payslip = await this.service.show(req.params.id);
+      const tenantId = req.auth?.user?.tenantId ?? null;
+      const payslip = await this.service.show(tenantId, req.params.id);
       if (!payslip) {
         return res.status(404).json({ message: "Payslip not found" });
       }

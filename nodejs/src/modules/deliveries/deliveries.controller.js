@@ -11,6 +11,10 @@ export class DeliveriesController {
     return req.auth?.user?.tenantId ?? null;
   }
 
+  getBranchId(req) {
+    return req.auth?.branch?.id ?? null;
+  }
+
   list = async (req, res, next) => {
     try {
       const result = await this.service.list(this.getTenantId(req), req.query);
@@ -51,6 +55,7 @@ export class DeliveriesController {
   create = async (req, res, next) => {
     try {
       const data = await this.service.create(this.getTenantId(req), req.body, {
+        branchId: this.getBranchId(req),
         ipAddress: getPersistedRequestIp(req)
       });
       res.status(201).json(successResponse({

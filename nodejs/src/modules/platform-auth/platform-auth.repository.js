@@ -34,6 +34,20 @@ export class PlatformAuthRepository {
     return mapAccount(rows[0]);
   }
 
+  async listActiveRolesByAccountId(accountId) {
+    const rows = await query(
+      `
+        SELECT role
+        FROM platform_account_roles
+        WHERE account_id = ?
+          AND status = 'active'
+      `,
+      [accountId]
+    );
+
+    return (rows ?? []).map((row) => row.role).filter(Boolean);
+  }
+
   async findAccountByEmail(email) {
     const rows = await query(
       `

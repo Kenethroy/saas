@@ -1,16 +1,21 @@
 import { query, transaction } from "#shared/database/mysql";
 
 export const purchaseOrdersRepository = {
-  async findPaginated({ page, limit, search, status, supplierId }) {
+  async findPaginated(tenantId, { page, limit, search, status, supplierId, branchId = null }) {
     const offset = (page - 1) * limit;
 
     let sql = `
       FROM purchase_orders po
-      JOIN suppliers s ON po.supplier_id = s.id
-      LEFT JOIN payment_terms pt ON po.payment_term_id = pt.id
-      WHERE po.delete_flg = 0
+      JOIN suppliers s ON po.supplier_id = s.id AND s.tenant_id = po.tenant_id
+      LEFT JOIN payment_terms pt ON po.payment_term_id = pt.id AND pt.tenant_id = po.tenant_id
+      WHERE po.tenant_id = ? AND po.delete_flg = 0
     `;
-    const params = [];
+    const params = [tenantId];
+
+    if (branchId) {
+      sql += " AND po.branch_id = ?";
+      params.push(branchId);
+    }
 
     if (search) {
       sql += " AND (po.po_number LIKE ? OR s.name LIKE ?)";
@@ -31,7 +36,7 @@ export const purchaseOrdersRepository = {
     const countSql = `SELECT COUNT(*) as total ${sql}`;
     const dataSql = `
       SELECT po.*, s.name as supplier_name, pt.name as pt_name,
-        (SELECT COUNT(*) FROM purchase_order_items poi WHERE poi.purchase_order_id = po.id) as items_count
+        (SELECT COUNT(*) FROM purchase_order_items poi WHERE poi.tenant_id = po.tenant_id AND poi.purchase_order_id = po.id) as items_count
       ${sql}
       ORDER BY po.id DESC
       LIMIT ? OFFSET ?
@@ -68,7 +73,7 @@ export const purchaseOrdersRepository = {
     return { items: formattedRows, total: countRows[0].total };
   },
 
-  async findById(id) {
+  async findById(tenantId, id) {
     const sql = `
       SELECT
         po.*,
@@ -81,22 +86,22 @@ export const purchaseOrdersRepository = {
         pt.name as pt_name,
         pt.days as pt_days
       FROM purchase_orders po
-      JOIN suppliers s ON po.supplier_id = s.id
-      LEFT JOIN payment_terms pt ON po.payment_term_id = pt.id
-      WHERE po.id = ? AND po.delete_flg = 0
+      JOIN suppliers s ON po.supplier_id = s.id AND s.tenant_id = po.tenant_id
+      LEFT JOIN payment_terms pt ON po.payment_term_id = pt.id AND pt.tenant_id = po.tenant_id
+      WHERE po.tenant_id = ? AND po.id = ? AND po.delete_flg = 0
       LIMIT 1
     `;
-    const rows = await query(sql, [id]);
+    const rows = await query(sql, [tenantId, id]);
     if (!rows[0]) return null;
 
     const row = rows[0];
     const items = await query(`
       SELECT poi.*, pv.stock_quantity
       FROM purchase_order_items poi
-      JOIN product_variants pv ON poi.product_variant_id = pv.id
-      WHERE poi.purchase_order_id = ?
+      JOIN product_variants pv ON poi.product_variant_id = pv.id AND pv.tenant_id = poi.tenant_id
+      WHERE poi.tenant_id = ? AND poi.purchase_order_id = ?
       ORDER BY poi.id ASC
-    `, [id]);
+    `, [tenantId, id]);
 
     return {
       ...row,
@@ -139,15 +144,15 @@ export const purchaseOrdersRepository = {
     };
   },
 
-  async findSupplierById(supplierId) {
+  async findSupplierById(tenantId, supplierId) {
     const sql = `
       SELECT s.*, pt.name as pt_name, pt.days as pt_days
       FROM suppliers s
-      LEFT JOIN payment_terms pt ON s.payment_term_id = pt.id
-      WHERE s.id = ? AND s.delete_flg = 0 AND s.status = 1
+      LEFT JOIN payment_terms pt ON s.payment_term_id = pt.id AND pt.tenant_id = s.tenant_id
+      WHERE s.tenant_id = ? AND s.id = ? AND s.delete_flg = 0 AND s.status = 1
       LIMIT 1
     `;
-    const rows = await query(sql, [supplierId]);
+    const rows = await query(sql, [tenantId, supplierId]);
     if (!rows[0]) return null;
     const row = rows[0];
     return {
@@ -156,15 +161,15 @@ export const purchaseOrdersRepository = {
     };
   },
 
-  async findProductVariantsByIds(ids) {
+  async findProductVariantsByIds(tenantId, ids) {
     if (ids.length === 0) return [];
     const sql = `
       SELECT pv.*, p.name as p_name
       FROM product_variants pv
-      JOIN products p ON pv.product_id = p.id
-      WHERE pv.id IN (?) AND pv.delete_flg = 0 AND pv.status = 1
+      JOIN products p ON pv.product_id = p.id AND p.tenant_id = pv.tenant_id
+      WHERE pv.tenant_id = ? AND pv.id IN (?) AND pv.delete_flg = 0 AND pv.status = 1
     `;
-    const rows = await query(sql, [ids]);
+    const rows = await query(sql, [tenantId, ids]);
     return rows.map(row => ({
       ...row,
       id: row.id,
@@ -174,22 +179,22 @@ export const purchaseOrdersRepository = {
     }));
   },
 
-  async findLatestOrder() {
-    const rows = await query("SELECT * FROM purchase_orders ORDER BY id DESC LIMIT 1");
+  async findLatestOrder(tenantId) {
+    const rows = await query("SELECT * FROM purchase_orders WHERE tenant_id = ? ORDER BY id DESC LIMIT 1", [tenantId]);
     if (!rows[0]) return null;
     return { ...rows[0], poNumber: rows[0].po_number };
   },
 
-  async createWithItems(poData, items) {
+  async createWithItems(tenantId, poData, items) {
     return transaction(async (tx) => {
       const pSql = `
         INSERT INTO purchase_orders (
-          po_number, supplier_id, order_date, expected_date, payment_term_id,
+          tenant_id, branch_id, po_number, supplier_id, order_date, expected_date, payment_term_id,
           items_subtotal, total_amount, notes, created_ip, updated_ip, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
       const [pResult] = await tx.execute(pSql, [
-        poData.poNumber, poData.supplierId, poData.orderDate, poData.expectedDate, poData.paymentTermId,
+        tenantId, poData.branchId ?? null, poData.poNumber, poData.supplierId, poData.orderDate, poData.expectedDate, poData.paymentTermId,
         poData.itemsSubtotal, poData.totalAmount, poData.notes || null,
         poData.createdIp || null, poData.updatedIp || null, poData.status || 'pending'
       ]);
@@ -199,63 +204,63 @@ export const purchaseOrdersRepository = {
       for (const item of items) {
         const iSql = `
           INSERT INTO purchase_order_items (
-            purchase_order_id, product_id, product_variant_id, product_name, variant_name,
+            tenant_id, purchase_order_id, product_id, product_variant_id, product_name, variant_name,
             quantity, unit_cost, line_total
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         `;
         await tx.execute(iSql, [
-          poId, item.productId, item.productVariantId, item.productName, item.variantName,
+          tenantId, poId, item.productId, item.productVariantId, item.productName, item.variantName,
           item.quantity, item.unitCost, item.lineTotal
         ]);
       }
 
       return poId;
-    }).then(id => this.findById(id));
+    }).then((id) => this.findById(tenantId, id));
   },
 
-  async updateWithItems(id, poData, items) {
+  async updateWithItems(tenantId, id, poData, items) {
     return transaction(async (tx) => {
       const pSql = `
         UPDATE purchase_orders SET
           supplier_id = ?, order_date = ?, expected_date = ?, payment_term_id = ?,
           items_subtotal = ?, total_amount = ?, notes = ?, updated_ip = ?
-        WHERE id = ?
+        WHERE tenant_id = ? AND id = ?
       `;
       await tx.execute(pSql, [
         poData.supplierId, poData.orderDate, poData.expectedDate, poData.paymentTermId,
         poData.itemsSubtotal, poData.totalAmount, poData.notes || null,
-        poData.updatedIp || null, id
+        poData.updatedIp || null, tenantId, id
       ]);
 
-      await tx.execute("DELETE FROM purchase_order_items WHERE purchase_order_id = ?", [id]);
+      await tx.execute("DELETE FROM purchase_order_items WHERE tenant_id = ? AND purchase_order_id = ?", [tenantId, id]);
 
       for (const item of items) {
         const iSql = `
           INSERT INTO purchase_order_items (
-            purchase_order_id, product_id, product_variant_id, product_name, variant_name,
+            tenant_id, purchase_order_id, product_id, product_variant_id, product_name, variant_name,
             quantity, unit_cost, line_total
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         `;
         await tx.execute(iSql, [
-          id, item.productId, item.productVariantId, item.productName, item.variantName,
+          tenantId, id, item.productId, item.productVariantId, item.productName, item.variantName,
           item.quantity, item.unitCost, item.lineTotal
         ]);
       }
-    }).then(() => this.findById(id));
+    }).then(() => this.findById(tenantId, id));
   },
 
-  async updateStatus(id, status, ipAddress) {
-    await query("UPDATE purchase_orders SET status = ?, updated_ip = ? WHERE id = ?", [status, ipAddress, id]);
-    return this.findById(id);
+  async updateStatus(tenantId, id, status, ipAddress) {
+    await query("UPDATE purchase_orders SET status = ?, updated_ip = ? WHERE tenant_id = ? AND id = ?", [status, ipAddress, tenantId, id]);
+    return this.findById(tenantId, id);
   },
 
-  async softDelete(id, ipAddress) {
-    await query("UPDATE purchase_orders SET delete_flg = 1, updated_ip = ? WHERE id = ?", [ipAddress, id]);
+  async softDelete(tenantId, id, ipAddress) {
+    await query("UPDATE purchase_orders SET delete_flg = 1, updated_ip = ? WHERE tenant_id = ? AND id = ?", [ipAddress, tenantId, id]);
   }
 
   ,
 
-  async receivePurchaseOrder(id, po, grnPayload, context = {}) {
+  async receivePurchaseOrder(tenantId, id, po, grnPayload, context = {}) {
     const { clientIp, userId } = context;
     const grnByItemId = new Map((grnPayload.items ?? []).map((g) => [Number(g.id), g]));
 
@@ -274,24 +279,24 @@ export const purchaseOrdersRepository = {
         await tx.execute(`
           UPDATE purchase_order_items SET
             received_quantity = ?, received_unit_cost = ?, received_line_total = ?
-          WHERE id = ?
-        `, [receivedQty, receivedCost, receivedLineTotal, item.id]);
+          WHERE tenant_id = ? AND id = ?
+        `, [receivedQty, receivedCost, receivedLineTotal, tenantId, item.id]);
 
         if (receivedQty <= 0) continue;
 
-        await tx.execute("UPDATE product_variants SET stock_quantity = stock_quantity + ? WHERE id = ?", [receivedQty, variantId]);
+        await tx.execute("UPDATE product_variants SET stock_quantity = stock_quantity + ? WHERE tenant_id = ? AND id = ?", [receivedQty, tenantId, variantId]);
 
-        const [updatedVariantRows] = await tx.execute("SELECT stock_quantity FROM product_variants WHERE id = ?", [variantId]);
+        const [updatedVariantRows] = await tx.execute("SELECT stock_quantity FROM product_variants WHERE tenant_id = ? AND id = ?", [tenantId, variantId]);
         const quantityAfter = Number(updatedVariantRows[0].stock_quantity);
         const quantityBefore = quantityAfter - receivedQty;
 
         await tx.execute(`
           INSERT INTO inventory_transactions (
-            product_id, product_variant_id, quantity_before, quantity_change, quantity_after,
+            tenant_id, branch_id, product_id, product_variant_id, quantity_before, quantity_change, quantity_after,
             transaction_type, reference_type, reference_id, reason, created_by, created_ip, updated_ip
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
-          item.productId, variantId, quantityBefore, receivedQty, quantityAfter,
+          tenantId, item.productId, variantId, quantityBefore, receivedQty, quantityAfter,
           1, "purchase_order", id, `GRN: Stock received from Purchase Order ${po.poNumber}`,
           userId || null, clientIp, clientIp
         ]);
@@ -300,32 +305,32 @@ export const purchaseOrdersRepository = {
       await tx.execute(`
         UPDATE purchase_orders SET
           status = 'received', received_total = ?, received_at = NOW(), received_notes = ?, updated_ip = ?
-        WHERE id = ?
-      `, [receivedTotal, grnPayload.notes || null, clientIp, id]);
+        WHERE tenant_id = ? AND id = ?
+      `, [receivedTotal, grnPayload.notes || null, clientIp, tenantId, id]);
 
       let dueDate = null;
       if (po.paymentTermId) {
-        const [ptRows] = await tx.execute("SELECT days FROM payment_terms WHERE id = ?", [po.paymentTermId]);
+        const [ptRows] = await tx.execute("SELECT days FROM payment_terms WHERE tenant_id = ? AND id = ?", [tenantId, po.paymentTermId]);
         if (ptRows[0]?.days) {
           dueDate = new Date();
           dueDate.setDate(dueDate.getDate() + ptRows[0].days);
         }
       }
 
-      const [existingAp] = await tx.execute("SELECT id FROM accounts_payable WHERE purchase_order_id = ?", [id]);
+      const [existingAp] = await tx.execute("SELECT id FROM accounts_payable WHERE tenant_id = ? AND purchase_order_id = ?", [tenantId, id]);
       if (existingAp.length === 0) {
         await tx.execute(`
           INSERT INTO accounts_payable (
-            purchase_order_id, supplier_id, po_number, receipt_date, due_date,
+            tenant_id, purchase_order_id, supplier_id, po_number, receipt_date, due_date,
             amount, paid_amount, outstanding_amount, status, notes, created_ip, updated_ip
-          ) VALUES (?, ?, ?, NOW(), ?, ?, 0, ?, 'unpaid', ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, NOW(), ?, ?, 0, ?, 'unpaid', ?, ?, ?)
         `, [
-          id, po.supplierId, po.poNumber, dueDate,
+          tenantId, id, po.supplierId, po.poNumber, dueDate,
           receivedTotal, receivedTotal, grnPayload.notes || null, clientIp, clientIp
         ]);
       }
 
       return id;
-    }).then((resultId) => this.findById(resultId));
+    }).then((resultId) => this.findById(tenantId, resultId));
   }
 };

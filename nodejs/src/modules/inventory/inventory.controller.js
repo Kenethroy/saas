@@ -10,6 +10,8 @@ export class InventoryController {
   applyStockAdjustment = async (req, res, next) => {
     try {
       const data = await this.service.applyStockAdjustment(req.body, {
+        tenantId: req.auth?.user?.tenantId ?? null,
+        branchId: req.auth?.branch?.id ?? null,
         userId: req.auth?.user?.id ?? null,
         ipAddress: getPersistedRequestIp(req)
       });
@@ -27,7 +29,10 @@ export class InventoryController {
 
   listTransactions = async (req, res, next) => {
     try {
-      const result = await this.service.listTransactions(req.query);
+      const tenantId = req.auth?.user?.tenantId ?? null;
+      const result = await this.service.listTransactions(tenantId, req.query, {
+        branchId: req.auth?.branch?.id ?? null
+      });
       res.status(200).json(
         successResponse({
           message: "Inventory transactions retrieved successfully",

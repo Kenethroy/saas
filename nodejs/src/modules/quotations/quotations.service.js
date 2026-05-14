@@ -2,12 +2,10 @@ import { QuotationsRepository } from "#modules/quotations/quotations.repository"
 import { createQuotationPdf } from "#modules/quotations/quotation-pdf";
 import { AppError } from "#shared/utils/app-error";
 
-function formatQuoteNumber(id) {
-  return `QT-${String(id).padStart(6, "0")}`;
-}
-
-function formatSalesOrderNumber(id) {
-  return `SO-${String(id).padStart(6, "0")}`;
+function requireTenantId(tenantId) {
+  const normalized = Number(tenantId);
+  if (!normalized) throw new AppError("Tenant context is required", 401);
+  return normalized;
 }
 
 function normalizeQuotation(record) {
@@ -122,8 +120,9 @@ export class QuotationsService {
     this.repository = repository;
   }
 
-  async getById(id) {
-    const quotation = await this.repository.findById(id);
+  async getById(tenantId, id) {
+    const scopedTenantId = requireTenantId(tenantId);
+    const quotation = await this.repository.findById(scopedTenantId, Number(id));
     if (!quotation) {
       throw new AppError("Quotation not found", 404);
     }
@@ -131,8 +130,9 @@ export class QuotationsService {
     return normalizeQuotation(quotation);
   }
 
-  async list(filters) {
-    const { rows, total } = await this.repository.findPaginated({
+  async list(tenantId, filters) {
+    const scopedTenantId = requireTenantId(tenantId);
+    const { rows, total } = await this.repository.findPaginated(scopedTenantId, {
       page: filters.page,
       perPage: filters.perPage,
       search: filters.search,
@@ -152,15 +152,15 @@ export class QuotationsService {
     };
   }
 
-  async create(payload, context = {}) {
-    const { normalizedItems, itemsSubtotal, discountAmount, totalAmount } = await this.prepareQuotationPayload(payload);
-    const latestQuotation = await this.repository.findLatestQuotation();
-    const nextId = Number(latestQuotation?.id ?? 0) + 1;
-    const quoteNumber = formatQuoteNumber(nextId);
+  async create(tenantId, payload, context = {}) {
+    const scopedTenantId = requireTenantId(tenantId);
+    const branchId = context.branchId ? Number(context.branchId) : null;
+    const { normalizedItems, itemsSubtotal, discountAmount, totalAmount } = await this.prepareQuotationPayload(scopedTenantId, payload);
     const ipAddress = context?.ipAddress ?? null;
 
     const quotation = await this.repository.createQuotation({
-      quote_number: quoteNumber,
+      tenantId: scopedTenantId,
+      branchId,
       customer_id: BigInt(payload.customerId),
       contact_person: payload.contactPerson ?? null,
       quote_date: new Date(payload.quoteDate),
@@ -175,6 +175,7 @@ export class QuotationsService {
       total_amount: totalAmount,
       notes: payload.notes ?? null,
       created_ip: ipAddress,
+      updated_ip: ipAddress,
       items: {
         create: normalizedItems.map(item => ({
           product_id: BigInt(item.productId),
@@ -194,18 +195,19 @@ export class QuotationsService {
     return normalizeQuotation(quotation);
   }
 
-  async update(id, payload, context = {}) {
-    const existing = await this.repository.findById(id);
+  async update(tenantId, id, payload, context = {}) {
+    const scopedTenantId = requireTenantId(tenantId);
+    const existing = await this.repository.findById(scopedTenantId, Number(id));
     if (!existing) {
       throw new AppError("Quotation not found", 404);
     }
 
     assertEditableStatus(existing.status);
 
-    const { normalizedItems, itemsSubtotal, discountAmount, totalAmount } = await this.prepareQuotationPayload(payload);
+    const { normalizedItems, itemsSubtotal, discountAmount, totalAmount } = await this.prepareQuotationPayload(scopedTenantId, payload);
     const ipAddress = context?.ipAddress ?? null;
 
-    await this.repository.updateQuotation(id, {
+    await this.repository.updateQuotation(scopedTenantId, Number(id), {
       customer_id: BigInt(payload.customerId),
       contact_person: payload.contactPerson ?? null,
       quote_date: new Date(payload.quoteDate),
@@ -218,11 +220,13 @@ export class QuotationsService {
       discount_amount: discountAmount,
       total_amount: totalAmount,
       notes: payload.notes ?? null,
-      updated_ip: ipAddress
+      updated_ip: ipAddress,
+      ...(context.branchId ? { branch_id: Number(context.branchId) } : {})
     });
 
     const updated = await this.repository.replaceQuotationItems(
-      id,
+      scopedTenantId,
+      Number(id),
       normalizedItems.map(item => ({
         product_id: BigInt(item.productId),
         product_variant_id: BigInt(item.productVariantId),
@@ -240,18 +244,20 @@ export class QuotationsService {
     return normalizeQuotation(updated);
   }
 
-  async delete(id) {
-    const existing = await this.repository.findById(id);
+  async delete(tenantId, id) {
+    const scopedTenantId = requireTenantId(tenantId);
+    const existing = await this.repository.findById(scopedTenantId, Number(id));
     if (!existing) {
       throw new AppError("Quotation not found", 404);
     }
 
     assertDeletableStatus(existing.status);
-    await this.repository.deleteQuotation(id);
+    await this.repository.deleteQuotation(scopedTenantId, Number(id));
   }
 
-  async updateStatus(id, status, context = {}) {
-    const existing = await this.repository.findById(id);
+  async updateStatus(tenantId, id, status, context = {}) {
+    const scopedTenantId = requireTenantId(tenantId);
+    const existing = await this.repository.findById(scopedTenantId, Number(id));
     if (!existing) {
       throw new AppError("Quotation not found", 404);
     }
@@ -262,7 +268,7 @@ export class QuotationsService {
 
     assertStatusTransition(existing.status, status);
 
-    const updated = await this.repository.updateQuotation(id, {
+    const updated = await this.repository.updateQuotation(scopedTenantId, Number(id), {
       status,
       updated_ip: context?.ipAddress ?? null
     });
@@ -270,8 +276,9 @@ export class QuotationsService {
     return normalizeQuotation(updated);
   }
 
-  async send(id, context = {}) {
-    const existing = await this.repository.findById(id);
+  async send(tenantId, id, context = {}) {
+    const scopedTenantId = requireTenantId(tenantId);
+    const existing = await this.repository.findById(scopedTenantId, Number(id));
     if (!existing) {
       throw new AppError("Quotation not found", 404);
     }
@@ -280,7 +287,7 @@ export class QuotationsService {
       throw new AppError("Only draft quotations can be sent.", 422);
     }
 
-    const updated = await this.repository.updateQuotation(id, {
+    const updated = await this.repository.updateQuotation(scopedTenantId, Number(id), {
       status: "sent",
       sent_at: new Date(),
       updated_ip: context?.ipAddress ?? null
@@ -289,8 +296,9 @@ export class QuotationsService {
     return normalizeQuotation(updated);
   }
 
-  async convertToSalesOrder(id, context = {}) {
-    const existing = await this.repository.findById(id);
+  async convertToSalesOrder(tenantId, id, context = {}) {
+    const scopedTenantId = requireTenantId(tenantId);
+    const existing = await this.repository.findById(scopedTenantId, Number(id));
     if (!existing) {
       throw new AppError("Quotation not found", 404);
     }
@@ -303,10 +311,10 @@ export class QuotationsService {
       throw new AppError("Quotation has already been converted to a sales order.", 422);
     }
 
-    const latestOrder = await this.repository.findLatestSalesOrder();
-    const nextOrderId = Number(latestOrder?.id ?? 0) + 1;
-    const salesOrderNumber = formatSalesOrderNumber(nextOrderId);
-    const converted = await this.repository.convertToSalesOrder(id, salesOrderNumber, context);
+    const converted = await this.repository.convertToSalesOrder(scopedTenantId, Number(id), {
+      branchId: context.branchId ? Number(context.branchId) : null,
+      ipAddress: context.ipAddress ?? null
+    });
 
     return {
       quotationId: Number(existing.id),
@@ -317,8 +325,8 @@ export class QuotationsService {
     };
   }
 
-  async createPdfDocument(id) {
-    const quotation = await this.getById(id);
+  async createPdfDocument(tenantId, id) {
+    const quotation = await this.getById(tenantId, id);
     const buffer = await createQuotationPdf(quotation);
 
     return {
@@ -327,28 +335,28 @@ export class QuotationsService {
     };
   }
 
-  async prepareQuotationPayload(payload) {
-    const customer = await this.repository.findCustomerById(payload.customerId);
+  async prepareQuotationPayload(tenantId, payload) {
+    const customer = await this.repository.findCustomerById(tenantId, payload.customerId);
     if (!customer) {
       throw new AppError("Customer not found", 404);
     }
 
     if (payload.agentId) {
-      const agent = await this.repository.findAgentById(payload.agentId);
+      const agent = await this.repository.findAgentById(tenantId, payload.agentId);
       if (!agent) {
         throw new AppError("Agent not found", 404);
       }
     }
 
     if (payload.paymentTermId) {
-      const paymentTerm = await this.repository.findPaymentTermById(payload.paymentTermId);
+      const paymentTerm = await this.repository.findPaymentTermById(tenantId, payload.paymentTermId);
       if (!paymentTerm) {
         throw new AppError("Payment term not found", 404);
       }
     }
 
     const variantIds = payload.items.map((item) => item.productVariantId);
-    const variants = await this.repository.findProductVariantsByIds(variantIds);
+    const variants = await this.repository.findProductVariantsByIds(tenantId, variantIds);
     const variantMap = new Map(variants.map((variant) => [Number(variant.id), variant]));
 
     const normalizedItems = payload.items.map((item) => {

@@ -188,6 +188,23 @@ Important rule:
 - [ ] add `branch_id` filters to branch-sensitive modules
 - [ ] move stock handling to branch-aware balances
 - [ ] make document numbering use `document_sequences`
+- [x] purchase order numbering uses `document_sequences` (API)
+- [x] payslip numbering uses `document_sequences` (API)
+- [x] customer + supplier payment numbering uses `document_sequences` (API)
+- [x] sales order numbering uses `document_sequences` (API)
+- [x] delivery numbering uses `document_sequences` (API)
+- [x] invoice numbering uses `document_sequences` (API)
+- [x] quotation numbering uses `document_sequences` (API)
+- [x] tenant-scope quotations + conversion writes (API)
+- [x] tenant-scope purchase orders + receiving stock writes (API)
+- [x] tenant-scope accounts payable + accounts receivable (API)
+- [x] tenant-scope inventory transactions + stock adjustment apply (API)
+- [x] tenant-scope inventory adjustments module (stock-adjustments) (API)
+- [x] tenant-scope business expenses + recurring expenses (API)
+- [x] tenant-scope payslips (API)
+- [x] tenant-scope payments (API)
+- [x] add branch context resolver (`x-branch-id`) + branch-aware payments writes (API)
+- [x] add branch-aware filters for PO/inventory/expenses/stock-adjustments (API)
 - [x] tenant-scope master data modules: customers, suppliers, products, categories, payment terms
 - [x] tenant-scope customer and supplier payment lookups/writes used by those modules
 - [x] tenant-scope sales orders, deliveries, delivery selection, invoice PDF, and fulfillment transaction writes
@@ -207,8 +224,8 @@ Highest-risk modules:
 
 ## Phase 7: Platform admin
 
-- [ ] create platform admin auth path
-- [ ] tenant search/list page
+- [x] create platform admin auth path (API)
+- [x] tenant search/list endpoint (API)
 - [ ] plan management page
 - [ ] subscription review page
 - [ ] manual suspend/reactivate controls

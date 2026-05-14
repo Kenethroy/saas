@@ -8,6 +8,7 @@ import {
   updateDeliveryStatusSchema
 } from "#modules/deliveries/deliveries.validator";
 import { authenticate } from "#shared/middleware/auth.middleware";
+import { resolveBranch } from "#shared/middleware/branch-context.middleware";
 import { requirePermission } from "#shared/middleware/permission.middleware";
 import { validateRequest } from "#shared/middleware/validate-request.middleware";
 
@@ -17,6 +18,7 @@ const controller = new DeliveriesController();
 router.get(
   "/selection-options",
   authenticate,
+  resolveBranch,
   requirePermission("deliveries.view"),
   controller.selectionOptions
 );
@@ -24,6 +26,7 @@ router.get(
 router.get(
   "/",
   authenticate,
+  resolveBranch,
   requirePermission("deliveries.view"),
   validateRequest(listDeliveriesSchema, "query"),
   controller.list
@@ -32,6 +35,7 @@ router.get(
 router.get(
   "/:id",
   authenticate,
+  resolveBranch,
   requirePermission("deliveries.view"),
   validateRequest(deliveryParamsSchema, "params"),
   controller.getById
@@ -40,6 +44,7 @@ router.get(
 router.get(
   "/:id/receipt/pdf",
   authenticate,
+  resolveBranch,
   requirePermission("deliveries.view"),
   validateRequest(deliveryParamsSchema, "params"),
   controller.receiptPdf
@@ -48,6 +53,7 @@ router.get(
 router.post(
   "/create",
   authenticate,
+  resolveBranch,
   requirePermission("deliveries.create"),
   validateRequest(createDeliverySchema),
   controller.create
@@ -56,6 +62,7 @@ router.post(
 router.patch(
   "/:id",
   authenticate,
+  resolveBranch,
   requirePermission("deliveries.update"),
   validateRequest(deliveryParamsSchema, "params"),
   validateRequest(updateDeliverySchema),
@@ -65,6 +72,7 @@ router.patch(
 router.patch(
   "/:id/status",
   authenticate,
+  resolveBranch,
   requirePermission("deliveries.update"),
   validateRequest(deliveryParamsSchema, "params"),
   validateRequest(updateDeliveryStatusSchema),

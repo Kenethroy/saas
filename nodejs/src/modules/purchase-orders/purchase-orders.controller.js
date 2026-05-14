@@ -4,7 +4,8 @@ import { getPersistedRequestIp } from "#shared/utils/request-ip";
 export const purchaseOrdersController = {
   async pdf(req, res, next) {
     try {
-      const { buffer, fileName } = await purchaseOrdersService.createPdfDocument(req.params.id);
+      const tenantId = req.auth?.user?.tenantId;
+      const { buffer, fileName } = await purchaseOrdersService.createPdfDocument(tenantId, req.params.id);
       const pdfBuffer = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
 
       res.setHeader("Content-Type", "application/pdf");
@@ -18,18 +19,20 @@ export const purchaseOrdersController = {
 
   async getPurchaseOrders(req, res, next) {
     try {
+      const tenantId = req.auth?.user?.tenantId;
       const page = parseInt(req.query.page, 10) || 1;
       const perPage = parseInt(req.query.perPage, 10) || 10;
       const search = req.query.search || "";
       const status = req.query.status;
       const supplierId = req.query.supplierId ? parseInt(req.query.supplierId, 10) : undefined;
 
-      const result = await purchaseOrdersService.getAllPurchaseOrders({
+      const result = await purchaseOrdersService.getAllPurchaseOrders(tenantId, {
         page,
         perPage,
         search,
         status,
-        supplierId
+        supplierId,
+        branchId: req.auth?.branch?.id ?? null
       });
 
       res.json(result);
@@ -41,7 +44,8 @@ export const purchaseOrdersController = {
   async getPurchaseOrder(req, res, next) {
     try {
       const { id } = req.params;
-      const po = await purchaseOrdersService.getPurchaseOrderById(id);
+      const tenantId = req.auth?.user?.tenantId;
+      const po = await purchaseOrdersService.getPurchaseOrderById(tenantId, id);
       res.json(po);
     } catch (error) {
       next(error);
@@ -51,7 +55,7 @@ export const purchaseOrdersController = {
   async createPurchaseOrder(req, res, next) {
     try {
       const clientIp = getPersistedRequestIp(req);
-      const context = { userId: req.user?.id, clientIp };
+      const context = { tenantId: req.auth?.user?.tenantId, branchId: req.auth?.branch?.id ?? null, userId: req.auth?.user?.id, clientIp };
       const newPo = await purchaseOrdersService.createPurchaseOrder(req.body, context);
       res.status(201).json(newPo);
     } catch (error) {
@@ -63,7 +67,7 @@ export const purchaseOrdersController = {
     try {
       const { id } = req.params;
       const clientIp = getPersistedRequestIp(req);
-      const context = { userId: req.user?.id, clientIp };
+      const context = { tenantId: req.auth?.user?.tenantId, branchId: req.auth?.branch?.id ?? null, userId: req.auth?.user?.id, clientIp };
       const updatedPo = await purchaseOrdersService.updatePurchaseOrder(id, req.body, context);
       res.json(updatedPo);
     } catch (error) {
@@ -75,7 +79,7 @@ export const purchaseOrdersController = {
     try {
       const { id } = req.params;
       const clientIp = getPersistedRequestIp(req);
-      const context = { userId: req.user?.id, clientIp };
+      const context = { tenantId: req.auth?.user?.tenantId, branchId: req.auth?.branch?.id ?? null, userId: req.auth?.user?.id, clientIp };
       const updatedPo = await purchaseOrdersService.updatePurchaseOrderStatus(id, req.body.status, context);
       res.json(updatedPo);
     } catch (error) {
@@ -87,7 +91,7 @@ export const purchaseOrdersController = {
     try {
       const { id } = req.params;
       const clientIp = getPersistedRequestIp(req);
-      const context = { userId: req.user?.id, clientIp };
+      const context = { tenantId: req.auth?.user?.tenantId, branchId: req.auth?.branch?.id ?? null, userId: req.auth?.user?.id, clientIp };
       const updatedPo = await purchaseOrdersService.receivePurchaseOrder(id, req.body, context);
       res.json(updatedPo);
     } catch (error) {
@@ -99,7 +103,7 @@ export const purchaseOrdersController = {
     try {
       const { id } = req.params;
       const clientIp = getPersistedRequestIp(req);
-      const context = { userId: req.user?.id, clientIp };
+      const context = { tenantId: req.auth?.user?.tenantId, branchId: req.auth?.branch?.id ?? null, userId: req.auth?.user?.id, clientIp };
       const result = await purchaseOrdersService.deletePurchaseOrder(id, context);
       res.json(result);
     } catch (error) {

@@ -23,17 +23,18 @@ function yyyymm(date) {
   return `${year}${month}`;
 }
 
-async function generateAdjustmentNumber(tx, adjustmentDate) {
+async function generateAdjustmentNumber(tx, tenantId, adjustmentDate) {
   const period = yyyymm(adjustmentDate);
   const prefix = `AJD-${period}-`;
 
   const [rows] = await tx.execute(`
     SELECT adjustment_number AS adjustmentNumber
     FROM inventory_adjustments
-    WHERE adjustment_number LIKE ?
+    WHERE tenant_id = ?
+      AND adjustment_number LIKE ?
     ORDER BY id DESC
     LIMIT 1
-  `, [`${prefix}%`]);
+  `, [tenantId, `${prefix}%`]);
 
   const latest = rows[0]?.adjustmentNumber ?? null;
   const latestSeq = typeof latest === "string" ? Number(latest.slice(prefix.length)) : 0;
@@ -57,11 +58,16 @@ async function hasRestockFlagColumn(connection = null) {
 }
 
 export class StockAdjustmentsRepository {
-  async findPaginated({ page, perPage, search, status, reason, sortOrder = 'DESC' }) {
+  async findPaginated(tenantId, { page, perPage, search, status, reason, sortOrder = 'DESC', branchId = null }) {
     const offset = (page - 1) * perPage;
 
-    let sql = "FROM inventory_adjustments ia WHERE ia.delete_flg = 0";
-    const params = [];
+    let sql = "FROM inventory_adjustments ia WHERE ia.tenant_id = ? AND ia.delete_flg = 0";
+    const params = [tenantId];
+
+    if (branchId) {
+      sql += " AND ia.branch_id = ?";
+      params.push(branchId);
+    }
 
     if (status) {
       sql += " AND ia.status = ?";
@@ -92,7 +98,7 @@ export class StockAdjustmentsRepository {
         ia.created_by AS createdBy,
         ia.created_at AS createdAt,
         ia.updated_at AS updatedAt,
-        (SELECT COUNT(*) FROM inventory_adjustment_items i WHERE i.inventory_adjustment_id = ia.id) AS itemCount
+        (SELECT COUNT(*) FROM inventory_adjustment_items i WHERE i.tenant_id = ia.tenant_id AND i.inventory_adjustment_id = ia.id) AS itemCount
       ${sql}
       ORDER BY ia.adjustment_date ${sortOrder}, ia.id ${sortOrder}
       LIMIT ? OFFSET ?
@@ -110,7 +116,7 @@ export class StockAdjustmentsRepository {
     };
   }
 
-  async findById(id) {
+  async findById(tenantId, id) {
     const restockFlagAvailable = await hasRestockFlagColumn();
     const sql = `
       SELECT
@@ -124,12 +130,12 @@ export class StockAdjustmentsRepository {
         ia.created_by AS createdBy,
         ia.created_at AS createdAt,
         ia.updated_at AS updatedAt,
-        (SELECT COUNT(*) FROM inventory_adjustment_items i WHERE i.inventory_adjustment_id = ia.id) AS itemCount
+        (SELECT COUNT(*) FROM inventory_adjustment_items i WHERE i.tenant_id = ia.tenant_id AND i.inventory_adjustment_id = ia.id) AS itemCount
       FROM inventory_adjustments ia
-      WHERE ia.id = ? AND ia.delete_flg = 0
+      WHERE ia.tenant_id = ? AND ia.id = ? AND ia.delete_flg = 0
       LIMIT 1
     `;
-    const rows = await query(sql, [id]);
+    const rows = await query(sql, [tenantId, id]);
     if (!rows[0]) return null;
 
     const header = rows[0];
@@ -145,22 +151,22 @@ export class StockAdjustmentsRepository {
         quantity_after AS quantityAfter,
         notes
       FROM inventory_adjustment_items
-      WHERE inventory_adjustment_id = ?
+      WHERE tenant_id = ? AND inventory_adjustment_id = ?
       ORDER BY id ASC
-    `, [id]);
+    `, [tenantId, id]);
 
     return { ...header, items };
   }
 
-  async findProductVariantsByIds(ids) {
+  async findProductVariantsByIds(tenantId, ids) {
     if (ids.length === 0) return [];
     const sql = `
       SELECT pv.*, p.name as p_name
       FROM product_variants pv
-      JOIN products p ON pv.product_id = p.id
-      WHERE pv.id IN (?) AND pv.delete_flg = 0
+      JOIN products p ON pv.product_id = p.id AND p.tenant_id = pv.tenant_id
+      WHERE pv.tenant_id = ? AND pv.id IN (?) AND pv.delete_flg = 0
     `;
-    const rows = await query(sql, [ids]);
+    const rows = await query(sql, [tenantId, ids]);
     return rows.map(row => ({
       ...row,
       id: row.id,
@@ -168,37 +174,48 @@ export class StockAdjustmentsRepository {
     }));
   }
 
-  async updateStatus(id, status, ipAddress, rejectReason = null) {
-    await query("UPDATE inventory_adjustments SET status = ?, updated_ip = ?, reject_reason = ? WHERE id = ?", [status, ipAddress, rejectReason, id]);
+  async updateStatus(tenantId, id, status, ipAddress, rejectReason = null) {
+    await query(
+      "UPDATE inventory_adjustments SET status = ?, updated_ip = ?, reject_reason = ? WHERE tenant_id = ? AND id = ?",
+      [status, ipAddress, rejectReason, tenantId, id]
+    );
   }
 
-  async softDelete(id, ipAddress) {
-    await query("UPDATE inventory_adjustments SET delete_flg = 1, updated_ip = ? WHERE id = ?", [ipAddress, id]);
+  async softDelete(tenantId, id, ipAddress) {
+    await query(
+      "UPDATE inventory_adjustments SET delete_flg = 1, updated_ip = ? WHERE tenant_id = ? AND id = ?",
+      [ipAddress, tenantId, id]
+    );
   }
 
   async create(payload, context = {}) {
     const ipAddress = context.ipAddress ?? null;
     const userId = context.userId ?? null;
+    const tenantId = context.tenantId ?? null;
+    const branchId = context.branchId ?? null;
     const adjustmentDate = payload.adjustmentDate ? new Date(payload.adjustmentDate) : new Date();
     const forceNonRestockable = payload.reason === "damaged" || payload.reason === "lost";
 
     const resultId = await transaction(async (tx) => {
       const restockFlagAvailable = await hasRestockFlagColumn(tx);
-      const adjustmentNumber = await generateAdjustmentNumber(tx, adjustmentDate);
+      const adjustmentNumber = await generateAdjustmentNumber(tx, tenantId, adjustmentDate);
 
       const [adjustmentResult] = await tx.execute(`
         INSERT INTO inventory_adjustments
-          (adjustment_number, adjustment_date, remarks, reason, created_by, status, reject_reason, delete_flg, created_ip, updated_ip)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+          (tenant_id, branch_id, adjustment_number, adjustment_date, remarks, reason, created_by, status, reject_reason, delete_flg, created_ip, updated_ip)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
       `, [
-        adjustmentNumber, adjustmentDate, payload.remarks ?? null, payload.reason ?? null,
+        tenantId, branchId, adjustmentNumber, adjustmentDate, payload.remarks ?? null, payload.reason ?? null,
         userId || null, "draft", null, ipAddress, ipAddress
       ]);
 
       const adjustmentId = adjustmentResult.insertId;
 
       const variantIds = payload.items.map((item) => item.productVariantId);
-      const [variants] = await tx.execute("SELECT id, product_id FROM product_variants WHERE id IN (?) AND delete_flg = 0", [variantIds]);
+      const [variants] = await tx.execute(
+        "SELECT id, product_id FROM product_variants WHERE tenant_id = ? AND id IN (?) AND delete_flg = 0",
+        [tenantId, variantIds]
+      );
       if (variants.length !== variantIds.length) {
         throw new AppError("One or more variants were not found.", 404);
       }
@@ -214,21 +231,21 @@ export class StockAdjustmentsRepository {
         if (restockFlagAvailable) {
           await tx.execute(`
             INSERT INTO inventory_adjustment_items
-              (inventory_adjustment_id, product_id, product_variant_id, adjust_type, quantity_change, restock_flag,
+              (tenant_id, inventory_adjustment_id, product_id, product_variant_id, adjust_type, quantity_change, restock_flag,
                quantity_before, quantity_after, notes, created_ip, updated_ip)
-            VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?)
           `, [
-            adjustmentId, variant.product_id, variant.id, adjustType, change, restockFlag ? 1 : 0,
+            tenantId, adjustmentId, variant.product_id, variant.id, adjustType, change, restockFlag ? 1 : 0,
             item.notes || null, ipAddress, ipAddress
           ]);
         } else {
           await tx.execute(`
             INSERT INTO inventory_adjustment_items
-              (inventory_adjustment_id, product_id, product_variant_id, adjust_type, quantity_change,
+              (tenant_id, inventory_adjustment_id, product_id, product_variant_id, adjust_type, quantity_change,
                quantity_before, quantity_after, notes, created_ip, updated_ip)
-            VALUES (?, ?, ?, ?, ?, 0, 0, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?)
           `, [
-            adjustmentId, variant.product_id, variant.id, adjustType, change,
+            tenantId, adjustmentId, variant.product_id, variant.id, adjustType, change,
             item.notes || null, ipAddress, ipAddress
           ]);
         }
@@ -237,10 +254,10 @@ export class StockAdjustmentsRepository {
       return adjustmentId;
     });
 
-    return this.findById(resultId);
+    return this.findById(tenantId, resultId);
   }
 
-  async update(id, payload, context = {}) {
+  async update(tenantId, id, payload, context = {}) {
     const ipAddress = context.ipAddress ?? null;
     const userId = context.userId ?? null;
     const adjustmentDate = payload.adjustmentDate ? new Date(payload.adjustmentDate) : null;
@@ -248,7 +265,10 @@ export class StockAdjustmentsRepository {
 
     await transaction(async (tx) => {
       const restockFlagAvailable = await hasRestockFlagColumn(tx);
-      const [existingRows] = await tx.execute("SELECT status FROM inventory_adjustments WHERE id = ? AND delete_flg = 0", [id]);
+      const [existingRows] = await tx.execute(
+        "SELECT status FROM inventory_adjustments WHERE tenant_id = ? AND id = ? AND delete_flg = 0",
+        [tenantId, id]
+      );
       if (existingRows.length === 0) {
         throw new AppError("Stock adjustment not found", 404);
       }
@@ -264,13 +284,16 @@ export class StockAdjustmentsRepository {
           reason = ?,
           created_by = COALESCE(created_by, ?),
           updated_ip = ?
-        WHERE id = ?
-      `, [adjustmentDate, payload.remarks || null, payload.reason || null, userId || null, ipAddress, id]);
+        WHERE tenant_id = ? AND id = ?
+      `, [adjustmentDate, payload.remarks || null, payload.reason || null, userId || null, ipAddress, tenantId, id]);
 
-      await tx.execute("DELETE FROM inventory_adjustment_items WHERE inventory_adjustment_id = ?", [id]);
+      await tx.execute("DELETE FROM inventory_adjustment_items WHERE tenant_id = ? AND inventory_adjustment_id = ?", [tenantId, id]);
 
       const variantIds = payload.items.map((item) => item.productVariantId);
-      const [variants] = await tx.execute("SELECT id, product_id FROM product_variants WHERE id IN (?) AND delete_flg = 0", [variantIds]);
+      const [variants] = await tx.execute(
+        "SELECT id, product_id FROM product_variants WHERE tenant_id = ? AND id IN (?) AND delete_flg = 0",
+        [tenantId, variantIds]
+      );
       if (variants.length !== variantIds.length) {
         throw new AppError("One or more variants were not found.", 404);
       }
@@ -286,33 +309,33 @@ export class StockAdjustmentsRepository {
         if (restockFlagAvailable) {
           await tx.execute(`
             INSERT INTO inventory_adjustment_items
-              (inventory_adjustment_id, product_id, product_variant_id, adjust_type, quantity_change, restock_flag,
+              (tenant_id, inventory_adjustment_id, product_id, product_variant_id, adjust_type, quantity_change, restock_flag,
                quantity_before, quantity_after, notes, created_ip, updated_ip)
-            VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?)
           `, [
-            id, variant.product_id, variant.id, adjustType, change, restockFlag ? 1 : 0,
+            tenantId, id, variant.product_id, variant.id, adjustType, change, restockFlag ? 1 : 0,
             item.notes || null, ipAddress, ipAddress
           ]);
         } else {
           await tx.execute(`
             INSERT INTO inventory_adjustment_items
-              (inventory_adjustment_id, product_id, product_variant_id, adjust_type, quantity_change,
+              (tenant_id, inventory_adjustment_id, product_id, product_variant_id, adjust_type, quantity_change,
                quantity_before, quantity_after, notes, created_ip, updated_ip)
-            VALUES (?, ?, ?, ?, ?, 0, 0, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?)
           `, [
-            id, variant.product_id, variant.id, adjustType, change,
+            tenantId, id, variant.product_id, variant.id, adjustType, change,
             item.notes || null, ipAddress, ipAddress
           ]);
         }
       }
     });
 
-    return this.findById(id);
+    return this.findById(tenantId, id);
   }
 
-  async submit(id, context = {}) {
+  async submit(tenantId, id, context = {}) {
     const ipAddress = context.ipAddress ?? null;
-    const header = await this.findById(id);
+    const header = await this.findById(tenantId, id);
     if (!header) {
       throw new AppError("Stock adjustment not found", 404);
     }
@@ -320,17 +343,20 @@ export class StockAdjustmentsRepository {
       throw new AppError("Only draft adjustments can be submitted.", 422);
     }
 
-    await this.updateStatus(id, "pending", ipAddress);
-    return this.findById(id);
+    await this.updateStatus(tenantId, id, "pending", ipAddress);
+    return this.findById(tenantId, id);
   }
 
-  async approve(id, context = {}) {
+  async approve(tenantId, id, context = {}) {
     const ipAddress = context.ipAddress ?? null;
     const userId = context.userId ?? null;
 
     await transaction(async (tx) => {
       const restockFlagAvailable = await hasRestockFlagColumn(tx);
-      const [headerRows] = await tx.execute("SELECT id, adjustment_number, reason, status FROM inventory_adjustments WHERE id = ? AND delete_flg = 0", [id]);
+      const [headerRows] = await tx.execute(
+        "SELECT id, tenant_id, branch_id, adjustment_number, reason, status FROM inventory_adjustments WHERE tenant_id = ? AND id = ? AND delete_flg = 0",
+        [tenantId, id]
+      );
       const header = headerRows[0];
       if (!header) {
         throw new AppError("Stock adjustment not found", 404);
@@ -339,7 +365,10 @@ export class StockAdjustmentsRepository {
         throw new AppError("Only pending adjustments can be approved.", 422);
       }
 
-      const [items] = await tx.execute("SELECT * FROM inventory_adjustment_items WHERE inventory_adjustment_id = ?", [id]);
+      const [items] = await tx.execute(
+        "SELECT * FROM inventory_adjustment_items WHERE tenant_id = ? AND inventory_adjustment_id = ?",
+        [tenantId, id]
+      );
 
       for (const item of items) {
         const variantId = item.product_variant_id;
@@ -364,48 +393,63 @@ export class StockAdjustmentsRepository {
             updateParams.unshift(restockFlag ? 1 : 0);
           }
 
-          await tx.execute(`UPDATE inventory_adjustment_items SET ${updateFields.join(", ")} WHERE id = ?`, updateParams);
+          await tx.execute(
+            `UPDATE inventory_adjustment_items SET ${updateFields.join(", ")} WHERE tenant_id = ? AND id = ?`,
+            [...updateParams.slice(0, -1), tenantId, updateParams[updateParams.length - 1]]
+          );
         }
 
         if (change < 0) {
           const [updateResult] = await tx.execute(`
             UPDATE product_variants SET stock_quantity = stock_quantity - ? 
-            WHERE id = ? AND delete_flg = 0 AND stock_quantity >= ?
-          `, [Math.abs(change), variantId, Math.abs(change)]);
+            WHERE tenant_id = ? AND id = ? AND delete_flg = 0 AND stock_quantity >= ?
+          `, [Math.abs(change), tenantId, variantId, Math.abs(change)]);
           if (updateResult.affectedRows === 0) {
             throw new AppError("Insufficient stock for one or more items.", 422);
           }
         } else {
-          await tx.execute("UPDATE product_variants SET stock_quantity = stock_quantity + ? WHERE id = ? AND delete_flg = 0", [change, variantId]);
+          await tx.execute(
+            "UPDATE product_variants SET stock_quantity = stock_quantity + ? WHERE tenant_id = ? AND id = ? AND delete_flg = 0",
+            [change, tenantId, variantId]
+          );
         }
 
-        const [variantRows] = await tx.execute("SELECT stock_quantity, product_id FROM product_variants WHERE id = ?", [variantId]);
+        const [variantRows] = await tx.execute(
+          "SELECT stock_quantity, product_id FROM product_variants WHERE tenant_id = ? AND id = ?",
+          [tenantId, variantId]
+        );
         const quantityAfter = Number(variantRows[0].stock_quantity);
         const quantityBefore = quantityAfter - change;
 
-        await tx.execute("UPDATE inventory_adjustment_items SET quantity_before = ?, quantity_after = ? WHERE id = ?", [quantityBefore, quantityAfter, item.id]);
+        await tx.execute(
+          "UPDATE inventory_adjustment_items SET quantity_before = ?, quantity_after = ? WHERE tenant_id = ? AND id = ?",
+          [quantityBefore, quantityAfter, tenantId, item.id]
+        );
 
         await tx.execute(`
           INSERT INTO inventory_transactions (
-            product_id, product_variant_id, quantity_before, quantity_change, quantity_after,
+            tenant_id, branch_id, product_id, product_variant_id, quantity_before, quantity_change, quantity_after,
             transaction_type, reference_type, reference_id, reason, created_by, created_ip, updated_ip
-          ) VALUES (?, ?, ?, ?, ?, 3, 'inventory_adjustment', ?, ?, ?, ?, ?)
+          ) VALUES (?, NULL, ?, ?, ?, ?, ?, 3, 'inventory_adjustment', ?, ?, ?, ?, ?)
         `, [
-          variantRows[0].product_id, variantId, quantityBefore, change, quantityAfter,
+          tenantId, variantRows[0].product_id, variantId, quantityBefore, change, quantityAfter,
           id, `Inventory adjustment approved - ${header.adjustment_number}${restockFlag ? "" : " (non-restockable)"}`,
           userId || null, ipAddress, ipAddress
         ]);
       }
 
-      await tx.execute("UPDATE inventory_adjustments SET status = 'approved', reject_reason = NULL, updated_ip = ? WHERE id = ?", [ipAddress, id]);
+      await tx.execute(
+        "UPDATE inventory_adjustments SET status = 'approved', reject_reason = NULL, updated_ip = ? WHERE tenant_id = ? AND id = ?",
+        [ipAddress, tenantId, id]
+      );
     });
 
-    return this.findById(id);
+    return this.findById(tenantId, id);
   }
 
-  async reject(id, reason, context = {}) {
+  async reject(tenantId, id, reason, context = {}) {
     const ipAddress = context.ipAddress ?? null;
-    const header = await this.findById(id);
+    const header = await this.findById(tenantId, id);
     if (!header) {
       throw new AppError("Stock adjustment not found", 404);
     }
@@ -413,13 +457,13 @@ export class StockAdjustmentsRepository {
       throw new AppError("Only pending adjustments can be rejected.", 422);
     }
 
-    await this.updateStatus(id, "rejected", ipAddress, reason);
-    return this.findById(id);
+    await this.updateStatus(tenantId, id, "rejected", ipAddress, reason);
+    return this.findById(tenantId, id);
   }
 
-  async delete(id, context = {}) {
+  async delete(tenantId, id, context = {}) {
     const ipAddress = context.ipAddress ?? null;
-    const header = await this.findById(id);
+    const header = await this.findById(tenantId, id);
     if (!header) {
       throw new AppError("Stock adjustment not found", 404);
     }
@@ -427,6 +471,6 @@ export class StockAdjustmentsRepository {
       throw new AppError("Only draft adjustments can be deleted.", 422);
     }
 
-    await this.softDelete(id, ipAddress);
+    await this.softDelete(tenantId, id, ipAddress);
   }
 }

@@ -1,10 +1,7 @@
 import { AppError } from "#shared/utils/app-error";
+import { allocateDocumentNumber } from "#shared/utils/document-sequences";
 
 const INVENTORY_TRANSACTION_TYPE_SALE = 2;
-
-function formatInvoiceNumber(id) {
-  return `INV-${String(id).padStart(6, "0")}`;
-}
 
 function addDays(date, days) {
   const copy = new Date(date);
@@ -86,10 +83,29 @@ export async function deliverSalesOrder(tx, salesOrderId, { tenantId = null, ipA
   const [invoiceRows] = await tx.execute("SELECT * FROM invoices WHERE tenant_id = ? AND sales_order_id = ? AND delete_flg = 0", [tenantId, salesOrderId]);
   let invoiceId;
   if (invoiceRows.length === 0) {
-    const [latestInv] = await tx.execute("SELECT id FROM invoices WHERE tenant_id = ? ORDER BY id DESC LIMIT 1", [tenantId]);
-    const nextInvId = (latestInv[0]?.id || 0) + 1;
-    const invoiceNumber = formatInvoiceNumber(nextInvId);
     const invoiceDate = new Date();
+    let effectiveBranchId = order.branch_id ? Number(order.branch_id) : null;
+    if (!effectiveBranchId) {
+      const [branchRows] = await tx.execute(
+        `
+          SELECT id
+          FROM branches
+          WHERE tenant_id = ?
+            AND is_primary = 1
+          LIMIT 1
+        `,
+        [Number(tenantId)]
+      );
+      effectiveBranchId = branchRows[0]?.id ? Number(branchRows[0].id) : null;
+    }
+
+    const invoiceNumber = await allocateDocumentNumber({
+      tenantId,
+      branchId: effectiveBranchId,
+      documentType: "invoice",
+      at: invoiceDate,
+      tx
+    });
     
     let dueDate = null;
     if (order.payment_term_id) {
@@ -106,7 +122,7 @@ export async function deliverSalesOrder(tx, salesOrderId, { tenantId = null, ipA
         status, remarks, created_ip, updated_ip
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, 0, ?, 'draft', ?, ?, ?)
     `, [
-      tenantId, order.branch_id || null, invoiceNumber, salesOrderId, order.customer_id, order.agent_id, order.payment_term_id,
+      tenantId, effectiveBranchId, invoiceNumber, salesOrderId, order.customer_id, order.agent_id, order.payment_term_id,
       invoiceDate, dueDate, order.items_subtotal, 0, order.items_subtotal,
       order.discount_type, order.discount_value, order.discount_amount, order.total_amount,
       order.total_amount, order.total_amount, order.notes ? String(order.notes).slice(0, 255) : null,

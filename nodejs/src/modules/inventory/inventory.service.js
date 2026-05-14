@@ -26,6 +26,10 @@ export class InventoryService {
   }
 
   async applyStockAdjustment(payload, context = {}) {
+    if (!context?.tenantId) {
+      throw new AppError("Tenant context is required", 400);
+    }
+
     try {
       const result = await this.repository.applyStockAdjustment(payload, context);
       return normalizeTransaction(result);
@@ -40,11 +44,15 @@ export class InventoryService {
     }
   }
 
-  async listTransactions(filters) {
+  async listTransactions(tenantId, filters, context = {}) {
+    if (!tenantId) {
+      throw new AppError("Tenant context is required", 400);
+    }
+
     const page = filters.page ?? 1;
     const perPage = filters.perPage ?? 25;
 
-    const { rows, total } = await this.repository.findPaginatedTransactions({
+    const { rows, total } = await this.repository.findPaginatedTransactions(tenantId, {
       page,
       perPage,
       productId: filters.productId,
@@ -52,7 +60,8 @@ export class InventoryService {
       transactionType: filters.transactionType,
       referenceType: filters.referenceType,
       search: filters.search,
-      sortOrder: filters.sortOrder
+      sortOrder: filters.sortOrder,
+      branchId: context.branchId ?? null
     });
 
     return {

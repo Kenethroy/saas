@@ -1,9 +1,6 @@
 import { query, transaction } from "#shared/database/mysql";
 import { AppError } from "#shared/utils/app-error";
-
-function formatPayslipNumber(id) {
-  return `PAYSLIP-${String(id).padStart(6, "0")}`;
-}
+import { allocateDocumentNumber } from "#shared/utils/document-sequences";
 
 function formatShortDate(val) {
   if (!val) return "";
@@ -16,11 +13,11 @@ function formatShortDate(val) {
 }
 
 export class PayslipsRepository {
-  async findPaginated({ page = 1, limit = 10, employeeId, dateFrom, dateTo, status } = {}) {
+  async findPaginated(tenantId, { page = 1, limit = 10, employeeId, dateFrom, dateTo, status } = {}) {
     const offset = (page - 1) * limit;
 
-    let whereSql = "WHERE p.delete_flg = 0";
-    const params = [];
+    let whereSql = "WHERE p.tenant_id = ? AND p.delete_flg = 0";
+    const params = [tenantId];
 
     if (employeeId) {
       whereSql += " AND p.employee_id = ?";
@@ -54,7 +51,7 @@ export class PayslipsRepository {
         e.first_name,
         e.last_name
       FROM payslips p
-      LEFT JOIN employees e ON e.id = p.employee_id
+      LEFT JOIN employees e ON e.id = p.employee_id AND e.tenant_id = p.tenant_id
       ${whereSql}
       ORDER BY p.pay_date DESC, p.id DESC
       LIMIT ? OFFSET ?
@@ -88,17 +85,17 @@ export class PayslipsRepository {
     };
   }
 
-  async findById(id) {
+  async findById(tenantId, id) {
     const rows = await query(`
       SELECT
         p.*,
         e.first_name,
         e.last_name
       FROM payslips p
-      LEFT JOIN employees e ON e.id = p.employee_id
-      WHERE p.id = ? AND p.delete_flg = 0
+      LEFT JOIN employees e ON e.id = p.employee_id AND e.tenant_id = p.tenant_id
+      WHERE p.tenant_id = ? AND p.id = ? AND p.delete_flg = 0
       LIMIT 1
-    `, [id]);
+    `, [tenantId, id]);
 
     const row = rows[0];
     if (!row) return null;
@@ -124,6 +121,7 @@ export class PayslipsRepository {
   }
 
   async create(payload, context = {}) {
+    const tenantId = context.tenantId ?? null;
     const employeeId = Number(payload.employee_id);
     const basicPay = Number(payload.basic_pay ?? 0);
     const overtimePay = Number(payload.overtime_pay ?? 0);
@@ -142,10 +140,42 @@ export class PayslipsRepository {
 
     const ipAddress = context.ipAddress ?? null;
 
+    if (!tenantId) {
+      throw new AppError("Tenant context is required", 400);
+    }
+
     return transaction(async (tx) => {
-      const [latest] = await tx.execute("SELECT id FROM payslips ORDER BY id DESC LIMIT 1");
-      const nextId = (latest[0]?.id || 0) + 1;
-      const payslipNumber = formatPayslipNumber(nextId);
+      const [employeeRows] = await tx.execute(
+        "SELECT id, tenant_id, branch_id, first_name, last_name FROM employees WHERE tenant_id = ? AND id = ? AND delete_flg = 0 LIMIT 1",
+        [tenantId, employeeId]
+      );
+      const employee = employeeRows[0];
+      if (!employee) {
+        throw new AppError("Employee not found", 404);
+      }
+
+      let effectiveBranchId = employee.branch_id ?? null;
+      if (!effectiveBranchId) {
+        const [branchRows] = await tx.execute(
+          `
+            SELECT id
+            FROM branches
+            WHERE tenant_id = ?
+              AND is_primary = 1
+            LIMIT 1
+          `,
+          [tenantId]
+        );
+        effectiveBranchId = branchRows[0]?.id ? Number(branchRows[0].id) : null;
+      }
+
+      const payslipNumber = await allocateDocumentNumber({
+        tenantId,
+        branchId: effectiveBranchId,
+        documentType: "payslip",
+        at: payload.pay_date,
+        tx
+      });
 
       const metadata = JSON.stringify({
         basic_pay: basicPay,
@@ -155,11 +185,13 @@ export class PayslipsRepository {
 
       const [result] = await tx.execute(`
         INSERT INTO payslips (
-          payslip_number, employee_id, period_start, period_end, pay_date,
+          tenant_id, branch_id, payslip_number, employee_id, period_start, period_end, pay_date,
           gross_pay, overtime_pay, total_deductions, net_pay, notes, metadata, status,
           created_ip, updated_ip
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [
+        tenantId,
+        effectiveBranchId,
         payslipNumber,
         employeeId,
         payload.period_start,
@@ -179,39 +211,46 @@ export class PayslipsRepository {
       const insertId = result.insertId;
 
       if ((payload.status || "draft") === "released") {
-        const [employeeRows] = await tx.execute(
-          "SELECT first_name, last_name FROM employees WHERE id = ? LIMIT 1",
-          [employeeId]
-        );
-        let employeeName = `Employee #${employeeId}`;
-        if (employeeRows[0]) {
-          employeeName = `${employeeRows[0].first_name || ""} ${employeeRows[0].last_name || ""}`.trim() || employeeName;
-        }
+        const employeeName = `${employee.first_name || ""} ${employee.last_name || ""}`.trim() || `Employee #${employeeId}`;
 
-        await tx.execute(`
-          INSERT INTO business_expenses (
-            category_id, payslip_id, amount, expense_date,
-            description, payee, payment_method, status,
-            created_by, created_ip, updated_ip
-          ) VALUES (33, ?, ?, ?, ?, ?, 'cash', 'paid', ?, ?, ?)
-        `, [
-          insertId,
-          netPay,
-          payload.pay_date,
-          `Salary — ${payslipNumber} (${formatShortDate(payload.period_start)} to ${formatShortDate(payload.period_end)})`,
-          employeeName,
-          context.userId ?? null,
-          ipAddress,
-          ipAddress
-        ]);
+        const [categoryRows] = await tx.execute(
+          "SELECT id FROM expense_categories WHERE tenant_id = ? AND name = 'Administrative Salaries' AND delete_flg = 0 AND status = 1 LIMIT 1",
+          [tenantId]
+        );
+        const categoryId = categoryRows[0]?.id ?? null;
+
+        if (categoryId) {
+          await tx.execute(`
+            INSERT INTO business_expenses (
+              tenant_id, branch_id, category_id, payslip_id, amount, expense_date,
+              description, payee, payment_method, status,
+              created_by, created_ip, updated_ip
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'cash', 'paid', ?, ?, ?)
+          `, [
+            tenantId,
+            effectiveBranchId,
+            categoryId,
+            insertId,
+            netPay,
+            payload.pay_date,
+            `Salary — ${payslipNumber} (${formatShortDate(payload.period_start)} to ${formatShortDate(payload.period_end)})`,
+            employeeName,
+            context.userId ?? null,
+            ipAddress,
+            ipAddress
+          ]);
+        }
       }
 
       return insertId;
-    }).then((id) => this.findById(id));
+    }).then((id) => this.findById(tenantId, id));
   }
 
-  async update(id, payload, context = {}) {
-    const existing = await this.findById(id);
+  async update(tenantId, id, payload, context = {}) {
+    if (!tenantId) {
+      throw new AppError("Tenant context is required", 400);
+    }
+    const existing = await this.findById(tenantId, id);
     if (!existing) {
       throw new AppError("Payslip not found", 404);
     }
@@ -249,14 +288,25 @@ export class PayslipsRepository {
     const becomingReleased = statusChanged && next.status === "released";
     const becomingDraft = statusChanged && next.status === "draft";
 
+    const employeeId = Number(next.employee_id);
+    const employeeRows = await query(
+      "SELECT id, branch_id FROM employees WHERE tenant_id = ? AND id = ? AND delete_flg = 0 LIMIT 1",
+      [tenantId, employeeId]
+    );
+    const employee = employeeRows[0];
+    if (!employee) {
+      throw new AppError("Employee not found", 404);
+    }
+
     await query(`
       UPDATE payslips
-      SET employee_id = ?, period_start = ?, period_end = ?, pay_date = ?,
+      SET branch_id = ?, employee_id = ?, period_start = ?, period_end = ?, pay_date = ?,
           gross_pay = ?, overtime_pay = ?, total_deductions = ?, net_pay = ?,
           notes = ?, metadata = ?, status = ?, updated_ip = ?
-      WHERE id = ?
+      WHERE tenant_id = ? AND id = ?
     `, [
-      Number(next.employee_id),
+      employee.branch_id ?? null,
+      employeeId,
       next.period_start,
       next.period_end,
       next.pay_date,
@@ -268,6 +318,7 @@ export class PayslipsRepository {
       JSON.stringify(next.metadata),
       next.status,
       ipAddress,
+      tenantId,
       id
     ]);
 
@@ -275,49 +326,63 @@ export class PayslipsRepository {
     if (becomingReleased) {
       // Only create if no expense record is already linked to this payslip
       const existingExpense = await query(
-        "SELECT id FROM business_expenses WHERE payslip_id = ? AND delete_flg = 0 LIMIT 1",
-        [id]
+        "SELECT id FROM business_expenses WHERE tenant_id = ? AND payslip_id = ? AND delete_flg = 0 LIMIT 1",
+        [tenantId, id]
       );
       if (!existingExpense.length) {
-        // Category 33 = Administrative Salaries (under Personnel & Labor, parent 3)
-        await query(`
-          INSERT INTO business_expenses (
-            category_id, payslip_id, amount, expense_date,
-            description, payee, payment_method, status,
-            created_by, created_ip, updated_ip
-          ) VALUES (33, ?, ?, ?, ?, ?, 'cash', 'paid', ?, ?, ?)
-        `, [
-          id,
-          netPay,
-          next.pay_date,
-          `Salary — ${existing.payslip_number} (${formatShortDate(next.period_start)} to ${formatShortDate(next.period_end)})`,
-          existing.employee_name || `Employee #${next.employee_id}`,
-          userId,
-          ipAddress,
-          ipAddress
-        ]);
+        const categoryRows = await query(
+          "SELECT id FROM expense_categories WHERE tenant_id = ? AND name = 'Administrative Salaries' AND delete_flg = 0 AND status = 1 LIMIT 1",
+          [tenantId]
+        );
+        const categoryId = categoryRows[0]?.id ?? null;
+
+        if (categoryId) {
+          await query(`
+            INSERT INTO business_expenses (
+              tenant_id, branch_id, category_id, payslip_id, amount, expense_date,
+              description, payee, payment_method, status,
+              created_by, created_ip, updated_ip
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'cash', 'paid', ?, ?, ?)
+          `, [
+            tenantId,
+            employee.branch_id ?? null,
+            categoryId,
+            id,
+            netPay,
+            next.pay_date,
+            `Salary — ${existing.payslip_number} (${formatShortDate(next.period_start)} to ${formatShortDate(next.period_end)})`,
+            existing.employee_name || `Employee #${employeeId}`,
+            userId,
+            ipAddress,
+            ipAddress
+          ]);
+        }
       }
     }
 
     if (becomingDraft) {
       // Soft-delete any linked expense when reverting to draft
       await query(
-        "UPDATE business_expenses SET delete_flg = 1, updated_ip = ? WHERE payslip_id = ? AND delete_flg = 0",
-        [ipAddress, id]
+        "UPDATE business_expenses SET delete_flg = 1, updated_ip = ? WHERE tenant_id = ? AND payslip_id = ? AND delete_flg = 0",
+        [ipAddress, tenantId, id]
       );
     }
 
-    return await this.findById(id);
+    return await this.findById(tenantId, id);
   }
 
-  async delete(id, context = {}) {
-    const existing = await this.findById(id);
+  async delete(tenantId, id, context = {}) {
+    if (!tenantId) {
+      throw new AppError("Tenant context is required", 400);
+    }
+
+    const existing = await this.findById(tenantId, id);
     if (!existing) {
       throw new AppError("Payslip not found", 404);
     }
 
     const ipAddress = context.ipAddress ?? null;
-    await query("UPDATE payslips SET delete_flg = 1, updated_ip = ? WHERE id = ?", [ipAddress, id]);
+    await query("UPDATE payslips SET delete_flg = 1, updated_ip = ? WHERE tenant_id = ? AND id = ?", [ipAddress, tenantId, id]);
     return true;
   }
 }

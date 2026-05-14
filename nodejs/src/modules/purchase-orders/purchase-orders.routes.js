@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { purchaseOrdersController } from "#modules/purchase-orders/purchase-orders.controller";
 import { authenticate } from "#shared/middleware/auth.middleware";
+import { resolveBranch } from "#shared/middleware/branch-context.middleware";
 import { requirePermission } from "#shared/middleware/permission.middleware";
 import { validateRequest } from "#shared/middleware/validate-request.middleware";
 import {
@@ -17,6 +18,7 @@ const router = Router();
 router.get(
   "/",
   authenticate,
+  resolveBranch,
   requirePermission("purchaseOrders.view"),
   validateRequest(listPurchaseOrdersSchema, "query"),
   purchaseOrdersController.getPurchaseOrders
@@ -25,6 +27,7 @@ router.get(
 router.get(
   "/:id",
   authenticate,
+  resolveBranch,
   requirePermission("purchaseOrders.view"),
   validateRequest(purchaseOrderParamsSchema, "params"),
   purchaseOrdersController.getPurchaseOrder
@@ -33,6 +36,7 @@ router.get(
 router.get(
   "/:id/pdf",
   authenticate,
+  resolveBranch,
   requirePermission("purchaseOrders.view"),
   validateRequest(purchaseOrderParamsSchema, "params"),
   purchaseOrdersController.pdf
@@ -41,6 +45,7 @@ router.get(
 router.post(
   "/",
   authenticate,
+  resolveBranch,
   requirePermission("purchaseOrders.create"),
   validateRequest(createPurchaseOrderSchema, "body"),
   purchaseOrdersController.createPurchaseOrder
@@ -49,6 +54,7 @@ router.post(
 router.put(
   "/:id",
   authenticate,
+  resolveBranch,
   requirePermission("purchaseOrders.update"),
   validateRequest(purchaseOrderParamsSchema, "params"),
   validateRequest(updatePurchaseOrderSchema, "body"),
@@ -58,6 +64,7 @@ router.put(
 router.patch(
   "/:id/status",
   authenticate,
+  resolveBranch,
   requirePermission("purchaseOrders.update"),
   validateRequest(purchaseOrderParamsSchema, "params"),
   validateRequest(updatePurchaseOrderStatusSchema, "body"),
@@ -67,6 +74,7 @@ router.patch(
 router.post(
   "/:id/receive",
   authenticate,
+  resolveBranch,
   requirePermission("purchaseOrders.update"),
   validateRequest(purchaseOrderParamsSchema, "params"),
   validateRequest(receivePurchaseOrderSchema, "body"),
@@ -76,6 +84,7 @@ router.post(
 router.delete(
   "/:id",
   authenticate,
+  resolveBranch,
   requirePermission("purchaseOrders.delete"),
   validateRequest(purchaseOrderParamsSchema, "params"),
   purchaseOrdersController.deletePurchaseOrder

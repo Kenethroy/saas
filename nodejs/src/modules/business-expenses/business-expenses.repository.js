@@ -60,7 +60,7 @@ function mapRecurringRow(row) {
 }
 
 export const businessExpensesRepository = {
-  async findCategories({ includeInactive = false } = {}) {
+  async findCategories(tenantId, { includeInactive = false } = {}) {
     let sql = `
       SELECT
         ec.id,
@@ -71,9 +71,10 @@ export const businessExpensesRepository = {
         ec.status,
         ec.delete_flg
       FROM expense_categories ec
-      WHERE ec.delete_flg = 0
+      WHERE ec.tenant_id = ?
+        AND ec.delete_flg = 0
     `;
-    const params = [];
+    const params = [tenantId];
 
     if (!includeInactive) {
       sql += " AND ec.status = 1";
@@ -84,18 +85,18 @@ export const businessExpensesRepository = {
     return query(sql, params);
   },
 
-  async findCategoryById(id) {
+  async findCategoryById(tenantId, id) {
     const rows = await query(`
       SELECT *
       FROM expense_categories
-      WHERE id = ? AND delete_flg = 0 AND status = 1
+      WHERE tenant_id = ? AND id = ? AND delete_flg = 0 AND status = 1
       LIMIT 1
-    `, [id]);
+    `, [tenantId, id]);
 
     return rows[0] || null;
   },
 
-  async listExpenses({ search, status, categoryId, paymentMethod, dateFrom, dateTo, skip, take }) {
+  async listExpenses(tenantId, { search, status, categoryId, paymentMethod, dateFrom, dateTo, branchId, skip, take }) {
     let sql = `
       SELECT
         be.*,
@@ -106,12 +107,18 @@ export const businessExpensesRepository = {
         rbe.next_run_date AS recurring_next_run_date,
         rbe.is_active AS recurring_is_active
       FROM business_expenses be
-      INNER JOIN expense_categories ec ON ec.id = be.category_id
-      LEFT JOIN expense_categories parent ON parent.id = ec.parent_id
-      LEFT JOIN recurring_business_expenses rbe ON rbe.id = be.recurring_expense_id
-      WHERE be.delete_flg = 0
+      INNER JOIN expense_categories ec ON ec.id = be.category_id AND ec.tenant_id = be.tenant_id
+      LEFT JOIN expense_categories parent ON parent.id = ec.parent_id AND parent.tenant_id = ec.tenant_id
+      LEFT JOIN recurring_business_expenses rbe ON rbe.id = be.recurring_expense_id AND rbe.tenant_id = be.tenant_id
+      WHERE be.tenant_id = ?
+        AND be.delete_flg = 0
     `;
-    const params = [];
+    const params = [tenantId];
+
+    if (branchId) {
+      sql += " AND be.branch_id = ?";
+      params.push(branchId);
+    }
 
     if (search) {
       sql += `
@@ -169,7 +176,7 @@ export const businessExpensesRepository = {
     };
   },
 
-  async findExpenseById(id) {
+  async findExpenseById(tenantId, id) {
     const rows = await query(`
       SELECT
         be.*,
@@ -180,19 +187,21 @@ export const businessExpensesRepository = {
         rbe.next_run_date AS recurring_next_run_date,
         rbe.is_active AS recurring_is_active
       FROM business_expenses be
-      INNER JOIN expense_categories ec ON ec.id = be.category_id
-      LEFT JOIN expense_categories parent ON parent.id = ec.parent_id
-      LEFT JOIN recurring_business_expenses rbe ON rbe.id = be.recurring_expense_id
-      WHERE be.id = ? AND be.delete_flg = 0
+      INNER JOIN expense_categories ec ON ec.id = be.category_id AND ec.tenant_id = be.tenant_id
+      LEFT JOIN expense_categories parent ON parent.id = ec.parent_id AND parent.tenant_id = ec.tenant_id
+      LEFT JOIN recurring_business_expenses rbe ON rbe.id = be.recurring_expense_id AND rbe.tenant_id = be.tenant_id
+      WHERE be.tenant_id = ? AND be.id = ? AND be.delete_flg = 0
       LIMIT 1
-    `, [id]);
+    `, [tenantId, id]);
 
     return rows[0] ? mapExpenseRow(rows[0]) : null;
   },
 
-  async createExpense(data) {
+  async createExpense(tenantId, data) {
     const result = await query(`
       INSERT INTO business_expenses (
+        tenant_id,
+        branch_id,
         category_id,
         recurring_expense_id,
         amount,
@@ -206,8 +215,10 @@ export const businessExpensesRepository = {
         created_by,
         created_ip,
         updated_ip
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
+      tenantId,
+      data.branchId ?? null,
       data.categoryId,
       data.recurringExpenseId ?? null,
       data.amount,
@@ -223,13 +234,14 @@ export const businessExpensesRepository = {
       data.updatedIp ?? null
     ]);
 
-    return this.findExpenseById(result.insertId);
+    return this.findExpenseById(tenantId, result.insertId);
   },
 
-  async updateExpense(id, data) {
+  async updateExpense(tenantId, id, data) {
     const fields = [];
     const params = [];
     const map = {
+      branchId: "branch_id",
       categoryId: "category_id",
       recurringExpenseId: "recurring_expense_id",
       amount: "amount",
@@ -252,14 +264,14 @@ export const businessExpensesRepository = {
     }
 
     if (fields.length === 0) {
-      return this.findExpenseById(id);
+      return this.findExpenseById(tenantId, id);
     }
 
-    await query(`UPDATE business_expenses SET ${fields.join(", ")} WHERE id = ?`, [...params, id]);
-    return this.findExpenseById(id);
+    await query(`UPDATE business_expenses SET ${fields.join(", ")} WHERE tenant_id = ? AND id = ?`, [...params, tenantId, id]);
+    return this.findExpenseById(tenantId, id);
   },
 
-  async listRecurringExpenses({ search, categoryId, frequency, isActive }) {
+  async listRecurringExpenses(tenantId, { search, categoryId, frequency, isActive }) {
     let sql = `
       SELECT
         rbe.*,
@@ -268,17 +280,17 @@ export const businessExpensesRepository = {
         parent.name AS parent_category_name,
         COALESCE(expense_counts.generated_expenses_count, 0) AS generated_expenses_count
       FROM recurring_business_expenses rbe
-      INNER JOIN expense_categories ec ON ec.id = rbe.category_id
-      LEFT JOIN expense_categories parent ON parent.id = ec.parent_id
+      INNER JOIN expense_categories ec ON ec.id = rbe.category_id AND ec.tenant_id = rbe.tenant_id
+      LEFT JOIN expense_categories parent ON parent.id = ec.parent_id AND parent.tenant_id = ec.tenant_id
       LEFT JOIN (
         SELECT recurring_expense_id, COUNT(*) AS generated_expenses_count
         FROM business_expenses
-        WHERE delete_flg = 0 AND recurring_expense_id IS NOT NULL
+        WHERE tenant_id = ? AND delete_flg = 0 AND recurring_expense_id IS NOT NULL
         GROUP BY recurring_expense_id
       ) expense_counts ON expense_counts.recurring_expense_id = rbe.id
-      WHERE rbe.delete_flg = 0
+      WHERE rbe.tenant_id = ? AND rbe.delete_flg = 0
     `;
-    const params = [];
+    const params = [tenantId, tenantId];
 
     if (search) {
       sql += `
@@ -318,7 +330,7 @@ export const businessExpensesRepository = {
     return rows.map(mapRecurringRow);
   },
 
-  async findRecurringExpenseById(id) {
+  async findRecurringExpenseById(tenantId, id) {
     const rows = await query(`
       SELECT
         rbe.*,
@@ -327,24 +339,25 @@ export const businessExpensesRepository = {
         parent.name AS parent_category_name,
         COALESCE(expense_counts.generated_expenses_count, 0) AS generated_expenses_count
       FROM recurring_business_expenses rbe
-      INNER JOIN expense_categories ec ON ec.id = rbe.category_id
-      LEFT JOIN expense_categories parent ON parent.id = ec.parent_id
+      INNER JOIN expense_categories ec ON ec.id = rbe.category_id AND ec.tenant_id = rbe.tenant_id
+      LEFT JOIN expense_categories parent ON parent.id = ec.parent_id AND parent.tenant_id = ec.tenant_id
       LEFT JOIN (
         SELECT recurring_expense_id, COUNT(*) AS generated_expenses_count
         FROM business_expenses
-        WHERE delete_flg = 0 AND recurring_expense_id IS NOT NULL
+        WHERE tenant_id = ? AND delete_flg = 0 AND recurring_expense_id IS NOT NULL
         GROUP BY recurring_expense_id
       ) expense_counts ON expense_counts.recurring_expense_id = rbe.id
-      WHERE rbe.id = ? AND rbe.delete_flg = 0
+      WHERE rbe.tenant_id = ? AND rbe.id = ? AND rbe.delete_flg = 0
       LIMIT 1
-    `, [id]);
+    `, [tenantId, tenantId, id]);
 
     return rows[0] ? mapRecurringRow(rows[0]) : null;
   },
 
-  async createRecurringExpense(data) {
+  async createRecurringExpense(tenantId, data) {
     const result = await query(`
       INSERT INTO recurring_business_expenses (
+        tenant_id,
         category_id,
         amount,
         description,
@@ -360,8 +373,9 @@ export const businessExpensesRepository = {
         created_by,
         created_ip,
         updated_ip
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
+      tenantId,
       data.categoryId,
       data.amount,
       data.description ?? null,
@@ -379,10 +393,10 @@ export const businessExpensesRepository = {
       data.updatedIp ?? null
     ]);
 
-    return this.findRecurringExpenseById(result.insertId);
+    return this.findRecurringExpenseById(tenantId, result.insertId);
   },
 
-  async updateRecurringExpense(id, data) {
+  async updateRecurringExpense(tenantId, id, data) {
     const fields = [];
     const params = [];
     const map = {
@@ -414,31 +428,38 @@ export const businessExpensesRepository = {
     }
 
     if (fields.length === 0) {
-      return this.findRecurringExpenseById(id);
+      return this.findRecurringExpenseById(tenantId, id);
     }
 
-    await query(`UPDATE recurring_business_expenses SET ${fields.join(", ")} WHERE id = ?`, [...params, id]);
-    return this.findRecurringExpenseById(id);
+    await query(`UPDATE recurring_business_expenses SET ${fields.join(", ")} WHERE tenant_id = ? AND id = ?`, [...params, tenantId, id]);
+    return this.findRecurringExpenseById(tenantId, id);
   },
 
-  async summarizeExpenses({ weekStart, weekEnd, monthStart, monthEnd }) {
+  async summarizeExpenses(tenantId, { branchId, weekStart, weekEnd, monthStart, monthEnd }) {
+    const branchClause = branchId ? " AND branch_id = ?" : "";
+    const branchParams = branchId ? [branchId] : [];
+
     const [weekRows, monthRows, topRows] = await Promise.all([
       query(`
         SELECT COALESCE(SUM(amount), 0) AS total
         FROM business_expenses
-        WHERE delete_flg = 0
+        WHERE tenant_id = ?
+          AND delete_flg = 0
           AND status = 'paid'
+          ${branchClause}
           AND expense_date >= ?
           AND expense_date <= ?
-      `, [weekStart, weekEnd]),
+      `, [tenantId, ...branchParams, weekStart, weekEnd]),
       query(`
         SELECT COALESCE(SUM(amount), 0) AS total
         FROM business_expenses
-        WHERE delete_flg = 0
+        WHERE tenant_id = ?
+          AND delete_flg = 0
           AND status = 'paid'
+          ${branchClause}
           AND expense_date >= ?
           AND expense_date <= ?
-      `, [monthStart, monthEnd]),
+      `, [tenantId, ...branchParams, monthStart, monthEnd]),
       query(`
         SELECT
           be.category_id AS categoryId,
@@ -446,16 +467,18 @@ export const businessExpensesRepository = {
           parent.name AS parentCategory,
           SUM(be.amount) AS total
         FROM business_expenses be
-        INNER JOIN expense_categories ec ON ec.id = be.category_id
-        LEFT JOIN expense_categories parent ON parent.id = ec.parent_id
-        WHERE be.delete_flg = 0
+        INNER JOIN expense_categories ec ON ec.id = be.category_id AND ec.tenant_id = be.tenant_id
+        LEFT JOIN expense_categories parent ON parent.id = ec.parent_id AND parent.tenant_id = ec.tenant_id
+        WHERE be.tenant_id = ?
+          AND be.delete_flg = 0
           AND be.status = 'paid'
+          ${branchId ? " AND be.branch_id = ?" : ""}
           AND be.expense_date >= ?
           AND be.expense_date <= ?
         GROUP BY be.category_id, ec.name, parent.name
         ORDER BY total DESC
         LIMIT 5
-      `, [monthStart, monthEnd])
+      `, branchId ? [tenantId, branchId, monthStart, monthEnd] : [tenantId, monthStart, monthEnd])
     ]);
 
     return {

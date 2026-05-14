@@ -1,5 +1,6 @@
 import { AppError } from "#shared/utils/app-error";
 import { DeliveriesRepository } from "#modules/deliveries/deliveries.repository";
+import { AppError } from "#shared/utils/app-error";
 
 function requireTenantId(tenantId) {
   const normalized = Number(tenantId);
@@ -7,10 +8,6 @@ function requireTenantId(tenantId) {
     throw new AppError("Tenant context is required", 401);
   }
   return normalized;
-}
-
-function formatDeliveryNumber(id) {
-  return `DEL-${String(id).padStart(6, "0")}`;
 }
 
 function toName(record) {
@@ -93,9 +90,7 @@ export class DeliveriesService {
   async create(tenantId, payload, context = {}) {
     const scopedTenantId = requireTenantId(tenantId);
     const ipAddress = context.ipAddress ?? null;
-    const latest = await this.repository.findLatestDelivery(scopedTenantId);
-    const nextId = (latest?.id || 0) + 1;
-    const deliveryNumber = formatDeliveryNumber(nextId);
+    const branchId = context.branchId ? Number(context.branchId) : null;
 
     await this.repository.assertAssignableResources(scopedTenantId, payload);
 
@@ -106,7 +101,7 @@ export class DeliveriesService {
 
     return await this.repository.createWithLinks({
       tenantId: scopedTenantId,
-      deliveryNumber,
+      branchId,
       deliveryDate: new Date(payload.deliveryDate),
       driverId: payload.driverId,
       truckId: payload.truckId,

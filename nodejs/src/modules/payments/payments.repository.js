@@ -1,14 +1,7 @@
 import { query, transaction } from "#shared/database/mysql";
 import { AppError } from "#shared/utils/app-error";
 import { toPublicFileUrl } from "#shared/utils/uploads";
-
-function formatPaymentNumber(id) {
-  return `PAY-${String(id).padStart(6, "0")}`;
-}
-
-function formatSupplierPaymentNumber(id) {
-  return `SUPP-PAY-${String(id).padStart(6, "0")}`;
-}
+import { allocateDocumentNumber } from "#shared/utils/document-sequences";
 
 function resolveAccountsReceivableStatus(paidAmount, outstandingAmount) {
   const paid = Number(paidAmount ?? 0);
@@ -36,7 +29,25 @@ function resolveAccountsPayableStatus(paidAmount, outstandingAmount) {
 }
 
 export class PaymentsRepository {
-  async findPaginated({ tenantId, page, perPage, search, customerId }) {
+  async resolveEffectiveBranchId(tx, tenantId, branchId) {
+    const normalizedBranchId = branchId ? Number(branchId) : null;
+    if (normalizedBranchId) return normalizedBranchId;
+
+    const [branchRows] = await tx.execute(
+      `
+        SELECT id
+        FROM branches
+        WHERE tenant_id = ?
+          AND is_primary = 1
+        LIMIT 1
+      `,
+      [Number(tenantId)]
+    );
+
+    return branchRows[0]?.id ? Number(branchRows[0].id) : null;
+  }
+
+  async findPaginated({ tenantId, branchId = null, page, perPage, search, customerId }) {
     const offset = (page - 1) * perPage;
 
     let sql = `
@@ -45,6 +56,11 @@ export class PaymentsRepository {
       WHERE p.tenant_id = ?
     `;
     const params = [tenantId];
+
+    if (branchId) {
+      sql += " AND p.branch_id = ?";
+      params.push(branchId);
+    }
 
     if (search) {
       sql += " AND (p.payment_number LIKE ? OR p.reference_number LIKE ? OR c.name LIKE ? OR c.company LIKE ?)";
@@ -156,13 +172,14 @@ export class PaymentsRepository {
     };
   }
 
-  async findLatestPayment() {
-    const rows = await query("SELECT * FROM payments ORDER BY id DESC LIMIT 1");
+  async findLatestPayment(tenantId) {
+    const rows = await query("SELECT * FROM payments WHERE tenant_id = ? ORDER BY id DESC LIMIT 1", [tenantId]);
     return rows[0] || null;
   }
 
   async createCustomerPayment(payload, context = {}) {
     const tenantId = Number(context.tenantId);
+    const branchId = context.branchId ? Number(context.branchId) : null;
     const customerId = Number(payload.customerId);
     const ipAddress = context.ipAddress ?? null;
     const fileUrl = context.fileUrl ?? null;
@@ -186,18 +203,24 @@ export class PaymentsRepository {
     `, [tenantId, customerId]);
 
     return transaction(async (tx) => {
-      const [latest] = await tx.execute("SELECT id FROM payments ORDER BY id DESC LIMIT 1");
-      const nextId = (latest[0]?.id || 0) + 1;
-      const paymentNumber = formatPaymentNumber(nextId);
       const paymentAmount = Number(payload.amount);
+      const effectiveBranchId = await this.resolveEffectiveBranchId(tx, tenantId, branchId);
+
+      const paymentNumber = await allocateDocumentNumber({
+        tenantId,
+        branchId: effectiveBranchId,
+        documentType: "customer_payment",
+        at: payload.paymentDate,
+        tx
+      });
 
       const [paymentResult] = await tx.execute(`
         INSERT INTO payments (
-          tenant_id, payment_number, customer_id, payment_date, payment_method, amount,
+          tenant_id, branch_id, payment_number, customer_id, payment_date, payment_method, amount,
           reference_number, notes, file_url, created_ip, updated_ip
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [
-        tenantId, paymentNumber, customerId, new Date(payload.paymentDate), payload.paymentMethod, paymentAmount,
+        tenantId, effectiveBranchId, paymentNumber, customerId, new Date(payload.paymentDate), payload.paymentMethod, paymentAmount,
         payload.referenceNumber || null, payload.notes || null, fileUrl, ipAddress, ipAddress
       ]);
 
@@ -266,6 +289,7 @@ export class PaymentsRepository {
 
   async createSupplierPayment(payload, context = {}) {
     const tenantId = Number(context.tenantId);
+    const branchId = context.branchId ? Number(context.branchId) : null;
     const supplierId = Number(payload.supplierId);
     const accountsPayableId = Number(payload.accountsPayableId);
     const ipAddress = context.ipAddress ?? null;
@@ -297,17 +321,23 @@ export class PaymentsRepository {
     }
 
     return transaction(async (tx) => {
-      const [latest] = await tx.execute("SELECT id FROM supplier_payments ORDER BY id DESC LIMIT 1");
-      const nextId = (latest[0]?.id || 0) + 1;
-      const paymentNumber = formatSupplierPaymentNumber(nextId);
+      const effectiveBranchId = await this.resolveEffectiveBranchId(tx, tenantId, branchId);
+      const paymentNumber = await allocateDocumentNumber({
+        tenantId,
+        branchId: effectiveBranchId,
+        documentType: "supplier_payment",
+        at: payload.paymentDate,
+        tx
+      });
 
       const [paymentResult] = await tx.execute(`
         INSERT INTO supplier_payments (
-          tenant_id, payment_number, supplier_id, accounts_payable_id, payment_date, payment_method, amount,
+          tenant_id, branch_id, payment_number, supplier_id, accounts_payable_id, payment_date, payment_method, amount,
           reference_number, notes, file_url, created_ip, updated_ip
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [
         tenantId,
+        effectiveBranchId,
         paymentNumber,
         supplierId,
         accountsPayableId,

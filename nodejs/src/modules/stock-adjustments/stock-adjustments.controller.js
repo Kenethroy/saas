@@ -9,7 +9,10 @@ export class StockAdjustmentsController {
 
   list = async (req, res, next) => {
     try {
-      const result = await this.service.list(req.query);
+      const tenantId = req.auth?.user?.tenantId ?? null;
+      const result = await this.service.list(tenantId, req.query, {
+        branchId: req.auth?.branch?.id ?? null
+      });
       res.status(200).json(
         successResponse({
           message: "Stock adjustments retrieved successfully",
@@ -24,7 +27,8 @@ export class StockAdjustmentsController {
 
   getById = async (req, res, next) => {
     try {
-      const data = await this.service.getById(req.params.id);
+      const tenantId = req.auth?.user?.tenantId ?? null;
+      const data = await this.service.getById(tenantId, req.params.id);
       res.status(200).json(
         successResponse({
           message: "Stock adjustment retrieved successfully",
@@ -38,7 +42,10 @@ export class StockAdjustmentsController {
 
   create = async (req, res, next) => {
     try {
+      const tenantId = req.auth?.user?.tenantId ?? null;
       const data = await this.service.create(req.body, {
+        tenantId,
+        branchId: req.auth?.branch?.id ?? null,
         userId: req.auth?.user?.id ?? null,
         ipAddress: getPersistedRequestIp(req)
       });
@@ -55,7 +62,10 @@ export class StockAdjustmentsController {
 
   update = async (req, res, next) => {
     try {
+      const tenantId = req.auth?.user?.tenantId ?? null;
       const data = await this.service.update(req.params.id, req.body, {
+        tenantId,
+        branchId: req.auth?.branch?.id ?? null,
         userId: req.auth?.user?.id ?? null,
         ipAddress: getPersistedRequestIp(req)
       });
@@ -72,7 +82,8 @@ export class StockAdjustmentsController {
 
   submit = async (req, res, next) => {
     try {
-      const data = await this.service.submit(req.params.id, {
+      const tenantId = req.auth?.user?.tenantId ?? null;
+      const data = await this.service.submit(tenantId, req.params.id, {
         ipAddress: getPersistedRequestIp(req)
       });
       res.status(200).json(
@@ -88,7 +99,8 @@ export class StockAdjustmentsController {
 
   approve = async (req, res, next) => {
     try {
-      const data = await this.service.approve(req.params.id, {
+      const tenantId = req.auth?.user?.tenantId ?? null;
+      const data = await this.service.approve(tenantId, req.params.id, {
         userId: req.auth?.user?.id ?? null,
         ipAddress: getPersistedRequestIp(req)
       });
@@ -105,7 +117,8 @@ export class StockAdjustmentsController {
 
   reject = async (req, res, next) => {
     try {
-      const data = await this.service.reject(req.params.id, req.body.reason, {
+      const tenantId = req.auth?.user?.tenantId ?? null;
+      const data = await this.service.reject(tenantId, req.params.id, req.body.reason, {
         ipAddress: getPersistedRequestIp(req)
       });
       res.status(200).json(
@@ -121,7 +134,8 @@ export class StockAdjustmentsController {
 
   delete = async (req, res, next) => {
     try {
-      await this.service.delete(req.params.id, {
+      const tenantId = req.auth?.user?.tenantId ?? null;
+      await this.service.delete(tenantId, req.params.id, {
         ipAddress: getPersistedRequestIp(req)
       });
       res.status(200).json(

@@ -7,9 +7,17 @@ export class QuotationsController {
     this.service = service;
   }
 
+  getTenantId(req) {
+    return req.auth?.user?.tenantId ?? null;
+  }
+
+  getBranchId(req) {
+    return req.auth?.branch?.id ?? null;
+  }
+
   list = async (req, res, next) => {
     try {
-      const result = await this.service.list(req.query);
+      const result = await this.service.list(this.getTenantId(req), req.query);
       res.status(200).json(
         successResponse({
           message: "Quotations retrieved successfully",
@@ -24,7 +32,7 @@ export class QuotationsController {
 
   getById = async (req, res, next) => {
     try {
-      const quotation = await this.service.getById(req.params.id);
+      const quotation = await this.service.getById(this.getTenantId(req), req.params.id);
       res.status(200).json(
         successResponse({
           message: "Quotation retrieved successfully",
@@ -38,7 +46,7 @@ export class QuotationsController {
 
   pdf = async (req, res, next) => {
     try {
-      const { buffer, fileName } = await this.service.createPdfDocument(req.params.id);
+      const { buffer, fileName } = await this.service.createPdfDocument(this.getTenantId(req), req.params.id);
       const pdfBuffer = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
 
       res.setHeader("Content-Type", "application/pdf");
@@ -52,7 +60,8 @@ export class QuotationsController {
 
   create = async (req, res, next) => {
     try {
-      const quotation = await this.service.create(req.body, {
+      const quotation = await this.service.create(this.getTenantId(req), req.body, {
+        branchId: this.getBranchId(req),
         ipAddress: getPersistedRequestIp(req)
       });
       res.status(201).json(
@@ -68,7 +77,8 @@ export class QuotationsController {
 
   update = async (req, res, next) => {
     try {
-      const quotation = await this.service.update(req.params.id, req.body, {
+      const quotation = await this.service.update(this.getTenantId(req), req.params.id, req.body, {
+        branchId: this.getBranchId(req),
         ipAddress: getPersistedRequestIp(req)
       });
       res.status(200).json(
@@ -84,7 +94,7 @@ export class QuotationsController {
 
   delete = async (req, res, next) => {
     try {
-      await this.service.delete(req.params.id);
+      await this.service.delete(this.getTenantId(req), req.params.id);
       res.status(200).json(
         successResponse({
           message: "Quotation deleted successfully"
@@ -97,7 +107,7 @@ export class QuotationsController {
 
   updateStatus = async (req, res, next) => {
     try {
-      const quotation = await this.service.updateStatus(req.params.id, req.body.status, {
+      const quotation = await this.service.updateStatus(this.getTenantId(req), req.params.id, req.body.status, {
         ipAddress: getPersistedRequestIp(req)
       });
       res.status(200).json(
@@ -113,7 +123,7 @@ export class QuotationsController {
 
   send = async (req, res, next) => {
     try {
-      const quotation = await this.service.send(req.params.id, {
+      const quotation = await this.service.send(this.getTenantId(req), req.params.id, {
         ipAddress: getPersistedRequestIp(req)
       });
       res.status(200).json(
@@ -129,7 +139,8 @@ export class QuotationsController {
 
   convert = async (req, res, next) => {
     try {
-      const result = await this.service.convertToSalesOrder(req.params.id, {
+      const result = await this.service.convertToSalesOrder(this.getTenantId(req), req.params.id, {
+        branchId: this.getBranchId(req),
         ipAddress: getPersistedRequestIp(req)
       });
       res.status(200).json(

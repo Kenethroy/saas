@@ -1,16 +1,21 @@
 import { query, transaction } from "#shared/database/mysql";
 
 export class InventoryRepository {
-  async findPaginatedTransactions({ page, perPage, productId, productVariantId, transactionType, referenceType, search, sortOrder = 'desc' }) {
+  async findPaginatedTransactions(tenantId, { page, perPage, productId, productVariantId, transactionType, referenceType, search, sortOrder = 'desc', branchId = null }) {
     const offset = (page - 1) * perPage;
 
     let sql = `
       FROM inventory_transactions it
-      JOIN products p ON it.product_id = p.id
-      JOIN product_variants pv ON it.product_variant_id = pv.id
-      WHERE 1=1
+      JOIN products p ON it.product_id = p.id AND p.tenant_id = it.tenant_id
+      JOIN product_variants pv ON it.product_variant_id = pv.id AND pv.tenant_id = it.tenant_id
+      WHERE it.tenant_id = ?
     `;
-    const params = [];
+    const params = [tenantId];
+
+    if (branchId) {
+      sql += " AND it.branch_id = ?";
+      params.push(branchId);
+    }
 
     if (productId) {
       sql += " AND it.product_id = ?";
@@ -74,10 +79,13 @@ export class InventoryRepository {
   }
 
   async applyStockAdjustment(payload, context = {}) {
-    const { ipAddress, userId } = context;
+    const { ipAddress, userId, tenantId, branchId } = context;
 
     return transaction(async (tx) => {
-      const [vRows] = await tx.execute("SELECT id, product_id, stock_quantity, name FROM product_variants WHERE id = ? AND delete_flg = 0", [payload.productVariantId]);
+      const [vRows] = await tx.execute(
+        "SELECT id, tenant_id, product_id, stock_quantity, name FROM product_variants WHERE tenant_id = ? AND id = ? AND delete_flg = 0",
+        [tenantId, payload.productVariantId]
+      );
       if (vRows.length === 0) throw new Error("Product variant not found");
       const variant = vRows[0];
 
@@ -89,15 +97,18 @@ export class InventoryRepository {
         throw new Error("Stock adjustment would result in negative stock.");
       }
 
-      await tx.execute("UPDATE product_variants SET stock_quantity = ?, updated_ip = ? WHERE id = ?", [after, ipAddress, variant.id]);
+      await tx.execute(
+        "UPDATE product_variants SET stock_quantity = ?, updated_ip = ? WHERE tenant_id = ? AND id = ?",
+        [after, ipAddress, tenantId, variant.id]
+      );
 
       const [itResult] = await tx.execute(`
         INSERT INTO inventory_transactions (
-          product_id, product_variant_id, quantity_before, quantity_change, quantity_after,
+          tenant_id, branch_id, product_id, product_variant_id, quantity_before, quantity_change, quantity_after,
           transaction_type, reference_type, reference_id, reason, created_by, created_ip, updated_ip
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [
-        variant.product_id, variant.id, before, change, after,
+        tenantId, branchId ?? null, variant.product_id, variant.id, before, change, after,
         3, "stock_adjustment", null, payload.reason || `Stock adjustment for ${variant.name}`,
         userId || null, ipAddress, ipAddress
       ]);
@@ -105,10 +116,10 @@ export class InventoryRepository {
       const [finalRow] = await tx.execute(`
         SELECT it.*, p.name as product_name, pv.name as variant_name
         FROM inventory_transactions it
-        JOIN products p ON it.product_id = p.id
-        JOIN product_variants pv ON it.product_variant_id = pv.id
-        WHERE it.id = ?
-      `, [itResult.insertId]);
+        JOIN products p ON it.product_id = p.id AND p.tenant_id = it.tenant_id
+        JOIN product_variants pv ON it.product_variant_id = pv.id AND pv.tenant_id = it.tenant_id
+        WHERE it.tenant_id = ? AND it.id = ?
+      `, [tenantId, itResult.insertId]);
 
       return finalRow[0];
     });

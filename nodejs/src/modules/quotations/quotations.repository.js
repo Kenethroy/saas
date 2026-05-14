@@ -1,14 +1,15 @@
 import { query, transaction } from "#shared/database/mysql";
 import { AppError } from "#shared/utils/app-error";
+import { allocateDocumentNumber } from "#shared/utils/document-sequences";
 
 export class QuotationsRepository {
-  async findCustomerById(customerId) {
+  async findCustomerById(tenantId, customerId) {
     const rows = await query(`
       SELECT c.*, pt.id as pt_id, pt.name as pt_name, pt.days as pt_days
       FROM customers c
-      LEFT JOIN payment_terms pt ON c.payment_term_id = pt.id
-      WHERE c.id = ? AND c.delete_flg = 0 AND c.status = 1
-    `, [customerId]);
+      LEFT JOIN payment_terms pt ON c.payment_term_id = pt.id AND pt.tenant_id = c.tenant_id
+      WHERE c.tenant_id = ? AND c.id = ? AND c.delete_flg = 0 AND c.status = 1
+    `, [tenantId, customerId]);
     if (!rows[0]) return null;
     const row = rows[0];
     return {
@@ -21,42 +22,48 @@ export class QuotationsRepository {
     };
   }
 
-  async findAgentById(agentId) {
+  async findAgentById(tenantId, agentId) {
     if (!agentId) return null;
-    const rows = await query("SELECT * FROM employees WHERE id = ? AND delete_flg = 0 AND status = 'active'", [agentId]);
+    const rows = await query(
+      "SELECT * FROM employees WHERE tenant_id = ? AND id = ? AND delete_flg = 0 AND status = 'active'",
+      [tenantId, agentId]
+    );
     return rows[0] || null;
   }
 
-  async findPaymentTermById(paymentTermId) {
+  async findPaymentTermById(tenantId, paymentTermId) {
     if (!paymentTermId) return null;
-    const rows = await query("SELECT * FROM payment_terms WHERE id = ? AND delete_flg = 0 AND status = 1", [paymentTermId]);
+    const rows = await query(
+      "SELECT * FROM payment_terms WHERE tenant_id = ? AND id = ? AND delete_flg = 0 AND status = 1",
+      [tenantId, paymentTermId]
+    );
     return rows[0] || null;
   }
 
-  async findProductVariantsByIds(productVariantIds) {
+  async findProductVariantsByIds(tenantId, productVariantIds) {
     if (!productVariantIds.length) return [];
     return query(`
       SELECT pv.*, p.name as product_name
       FROM product_variants pv
-      JOIN products p ON pv.product_id = p.id
-      WHERE pv.id IN (?) AND pv.delete_flg = 0 AND pv.status = 1
-    `, [productVariantIds]);
+      JOIN products p ON pv.product_id = p.id AND p.tenant_id = pv.tenant_id
+      WHERE pv.tenant_id = ? AND pv.id IN (?) AND pv.delete_flg = 0 AND pv.status = 1
+    `, [tenantId, productVariantIds]);
   }
 
-  async findLatestQuotation() {
-    const rows = await query("SELECT * FROM quotations ORDER BY id DESC LIMIT 1");
+  async findLatestQuotation(tenantId) {
+    const rows = await query("SELECT * FROM quotations WHERE tenant_id = ? ORDER BY id DESC LIMIT 1", [tenantId]);
     return rows[0] || null;
   }
 
-  async findLatestSalesOrder() {
-    const rows = await query("SELECT * FROM sales_orders ORDER BY id DESC LIMIT 1");
+  async findLatestSalesOrder(tenantId) {
+    const rows = await query("SELECT * FROM sales_orders WHERE tenant_id = ? ORDER BY id DESC LIMIT 1", [tenantId]);
     return rows[0] || null;
   }
 
-  async findPaginated({ page, perPage, search, status, customerId, agentId }) {
+  async findPaginated(tenantId, { page, perPage, search, status, customerId, agentId }) {
     const offset = (page - 1) * perPage;
-    let whereSql = "WHERE q.delete_flg = 0";
-    const params = [];
+    let whereSql = "WHERE q.tenant_id = ? AND q.delete_flg = 0";
+    const params = [tenantId];
 
     if (search) {
       whereSql += " AND (q.quote_number LIKE ? OR c.name LIKE ? OR q.contact_person LIKE ?)";
@@ -85,10 +92,10 @@ export class QuotationsRepository {
         pt.name as payment_term_name, pt.days as payment_term_days,
         so.sales_order_number, so.status as so_status
       FROM quotations q
-      LEFT JOIN customers c ON q.customer_id = c.id
-      LEFT JOIN employees e ON q.agent_id = e.id
-      LEFT JOIN payment_terms pt ON q.payment_term_id = pt.id
-      LEFT JOIN sales_orders so ON q.sales_order_id = so.id
+      LEFT JOIN customers c ON q.customer_id = c.id AND c.tenant_id = q.tenant_id
+      LEFT JOIN employees e ON q.agent_id = e.id AND e.tenant_id = q.tenant_id
+      LEFT JOIN payment_terms pt ON q.payment_term_id = pt.id AND pt.tenant_id = q.tenant_id
+      LEFT JOIN sales_orders so ON q.sales_order_id = so.id AND so.tenant_id = q.tenant_id
       ${whereSql}
       ORDER BY q.id DESC
       LIMIT ? OFFSET ?
@@ -103,14 +110,16 @@ export class QuotationsRepository {
       const items = await query(`
         SELECT qi.*, pv.stock_quantity
         FROM quotation_items qi
-        LEFT JOIN product_variants pv ON qi.product_variant_id = pv.id
-        WHERE qi.quotation_id = ?
+        LEFT JOIN product_variants pv ON qi.product_variant_id = pv.id AND pv.tenant_id = qi.tenant_id
+        WHERE qi.tenant_id = ? AND qi.quotation_id = ?
         ORDER BY qi.id ASC
-      `, [row.id]);
+      `, [tenantId, row.id]);
 
       return {
         ...row,
         id: row.id,
+        tenantId: row.tenant_id,
+        branchId: row.branch_id,
         customerId: row.customer_id,
         paymentTermId: row.payment_term_id,
         agentId: row.agent_id,
@@ -154,7 +163,7 @@ export class QuotationsRepository {
     return { rows: formattedRows, total };
   }
 
-  async findById(id) {
+  async findById(tenantId, id) {
     const rows = await query(`
       SELECT 
         q.*,
@@ -163,27 +172,30 @@ export class QuotationsRepository {
         pt.name as payment_term_name, pt.days as payment_term_days,
         so.sales_order_number, so.status as so_status
       FROM quotations q
-      LEFT JOIN customers c ON q.customer_id = c.id
-      LEFT JOIN employees e ON q.agent_id = e.id
-      LEFT JOIN payment_terms pt ON q.payment_term_id = pt.id
-      LEFT JOIN sales_orders so ON q.sales_order_id = so.id
-      WHERE q.id = ? AND q.delete_flg = 0
-    `, [id]);
-    
-    if (!rows[0]) return null;
+      LEFT JOIN customers c ON q.customer_id = c.id AND c.tenant_id = q.tenant_id
+      LEFT JOIN employees e ON q.agent_id = e.id AND e.tenant_id = q.tenant_id
+      LEFT JOIN payment_terms pt ON q.payment_term_id = pt.id AND pt.tenant_id = q.tenant_id
+      LEFT JOIN sales_orders so ON q.sales_order_id = so.id AND so.tenant_id = q.tenant_id
+      WHERE q.tenant_id = ? AND q.id = ? AND q.delete_flg = 0
+      LIMIT 1
+    `, [tenantId, id]);
+
     const row = rows[0];
+    if (!row) return null;
 
     const items = await query(`
       SELECT qi.*, pv.stock_quantity
       FROM quotation_items qi
-      LEFT JOIN product_variants pv ON qi.product_variant_id = pv.id
-      WHERE qi.quotation_id = ?
+      LEFT JOIN product_variants pv ON qi.product_variant_id = pv.id AND pv.tenant_id = qi.tenant_id
+      WHERE qi.tenant_id = ? AND qi.quotation_id = ?
       ORDER BY qi.id ASC
-    `, [id]);
+    `, [tenantId, id]);
 
     return {
       ...row,
       id: row.id,
+      tenantId: row.tenant_id,
+      branchId: row.branch_id,
       customerId: row.customer_id,
       paymentTermId: row.payment_term_id,
       agentId: row.agent_id,
@@ -196,6 +208,9 @@ export class QuotationsRepository {
       discountValue: row.discount_value,
       discountAmount: row.discount_amount,
       totalAmount: row.total_amount,
+      contactPerson: row.contact_person,
+      sentAt: row.sent_at,
+      convertedAt: row.converted_at,
       customer: row.customer_id ? {
         id: row.customer_id,
         name: row.customer_name,
@@ -226,35 +241,58 @@ export class QuotationsRepository {
   async createQuotation(data) {
     const { items, ...qData } = data;
     return transaction(async (tx) => {
+      let effectiveBranchId = qData.branchId ? Number(qData.branchId) : null;
+      if (!effectiveBranchId) {
+        const [branchRows] = await tx.execute(
+          `
+            SELECT id
+            FROM branches
+            WHERE tenant_id = ?
+              AND is_primary = 1
+            LIMIT 1
+          `,
+          [Number(qData.tenantId)]
+        );
+        effectiveBranchId = branchRows[0]?.id ? Number(branchRows[0].id) : null;
+      }
+
+      const quoteNumber = qData.quote_number || await allocateDocumentNumber({
+        tenantId: qData.tenantId,
+        branchId: effectiveBranchId,
+        documentType: "quotation",
+        at: qData.quote_date,
+        tx
+      });
+
       const [qResult] = await tx.execute(`
         INSERT INTO quotations (
-          quote_number, customer_id, contact_person, quote_date, valid_until,
+          tenant_id, branch_id, quote_number, customer_id, contact_person, quote_date, valid_until,
           payment_term_id, agent_id, status, items_subtotal, discount_type,
-          discount_value, discount_amount, total_amount, notes, created_ip
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          discount_value, discount_amount, total_amount, notes, created_ip, updated_ip
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [
-        qData.quote_number, qData.customer_id, qData.contact_person, qData.quote_date, qData.valid_until,
+        qData.tenantId, effectiveBranchId, quoteNumber, qData.customer_id, qData.contact_person, qData.quote_date, qData.valid_until,
         qData.payment_term_id, qData.agent_id, qData.status, qData.items_subtotal, qData.discount_type,
-        qData.discount_value, qData.discount_amount, qData.total_amount, qData.notes, qData.created_ip
+        qData.discount_value, qData.discount_amount, qData.total_amount, qData.notes, qData.created_ip, qData.updated_ip
       ]);
       const quotationId = qResult.insertId;
 
       for (const item of items.create) {
         await tx.execute(`
           INSERT INTO quotation_items (
-            quotation_id, product_id, product_variant_id, product_name, variant_name,
+            tenant_id, quotation_id, product_id, product_variant_id, product_name, variant_name,
             description, quantity, unit_price, unit_cost, line_discount, line_total
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
-          quotationId, item.product_id, item.product_variant_id, item.product_name, item.variant_name,
+          qData.tenantId, quotationId, item.product_id, item.product_variant_id, item.product_name, item.variant_name,
           item.description, item.quantity, item.unit_price, item.unit_cost, item.line_discount, item.line_total
         ]);
       }
       return quotationId;
-    }).then(id => this.findById(id));
+    }).then(id => this.findById(qData.tenantId, id));
   }
 
-  async updateQuotation(id, data) {
+  async updateQuotation(tenantId, id, data) {
     const fields = [];
     const params = [];
     Object.entries(data).forEach(([key, value]) => {
@@ -264,55 +302,55 @@ export class QuotationsRepository {
       }
     });
     if (fields.length > 0) {
-      params.push(id);
-      await query(`UPDATE quotations SET ${fields.join(', ')} WHERE id = ?`, params);
+      params.push(tenantId, id);
+      await query(`UPDATE quotations SET ${fields.join(', ')} WHERE tenant_id = ? AND id = ?`, params);
     }
-    return this.findById(id);
+    return this.findById(tenantId, id);
   }
 
-  async replaceQuotationItems(quotationId, items) {
+  async replaceQuotationItems(tenantId, quotationId, items) {
     return transaction(async (tx) => {
-      await tx.execute("DELETE FROM quotation_items WHERE quotation_id = ?", [quotationId]);
+      await tx.execute("DELETE FROM quotation_items WHERE tenant_id = ? AND quotation_id = ?", [tenantId, quotationId]);
       for (const item of items) {
         await tx.execute(`
           INSERT INTO quotation_items (
-            quotation_id, product_id, product_variant_id, product_name, variant_name,
+            tenant_id, quotation_id, product_id, product_variant_id, product_name, variant_name,
             description, quantity, unit_price, unit_cost, line_discount, line_total
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
-          quotationId, item.product_id, item.product_variant_id, item.product_name, item.variant_name,
+          tenantId, quotationId, item.product_id, item.product_variant_id, item.product_name, item.variant_name,
           item.description, item.quantity, item.unit_price, item.unit_cost, item.line_discount, item.line_total
         ]);
       }
-    }).then(() => this.findById(quotationId));
+    }).then(() => this.findById(tenantId, quotationId));
   }
 
-  async deleteQuotation(id) {
-    return query("UPDATE quotations SET delete_flg = 1 WHERE id = ?", [id]);
+  async deleteQuotation(tenantId, id) {
+    return query("UPDATE quotations SET delete_flg = 1 WHERE tenant_id = ? AND id = ?", [tenantId, id]);
   }
 
-  async convertToSalesOrder(id, salesOrderNumber, context = {}) {
+  async convertToSalesOrder(tenantId, id, context = {}) {
     const ipAddress = context.ipAddress || null;
 
     return transaction(async (tx) => {
       const [quotationRows] = await tx.execute(`
         SELECT q.*, c.payment_term_id as customer_payment_term_id
         FROM quotations q
-        LEFT JOIN customers c ON q.customer_id = c.id
-        WHERE q.id = ? AND q.delete_flg = 0
-      `, [id]);
+        LEFT JOIN customers c ON q.customer_id = c.id AND c.tenant_id = q.tenant_id
+        WHERE q.tenant_id = ? AND q.id = ? AND q.delete_flg = 0
+      `, [tenantId, id]);
       const quotation = quotationRows[0];
 
       if (!quotation) throw new AppError("Quotation not found", 404);
       if (quotation.status !== "accepted") throw new AppError("Only accepted quotations can be converted.", 422);
       if (quotation.sales_order_id) throw new AppError("Quotation has already been converted to a sales order.", 422);
 
-      const [items] = await tx.execute("SELECT * FROM quotation_items WHERE quotation_id = ?", [id]);
+      const [items] = await tx.execute("SELECT * FROM quotation_items WHERE tenant_id = ? AND quotation_id = ?", [tenantId, id]);
 
       for (const item of items) {
         const [variantRows] = await tx.execute(
-          "SELECT name, stock_quantity FROM product_variants WHERE id = ?",
-          [item.product_variant_id]
+          "SELECT name, stock_quantity FROM product_variants WHERE tenant_id = ? AND id = ?",
+          [tenantId, item.product_variant_id]
         );
         const variant = variantRows[0];
         if (!variant) throw new AppError(`Variant ${item.product_variant_id} not found`, 404);
@@ -321,13 +359,38 @@ export class QuotationsRepository {
         }
       }
 
+      let effectiveBranchId = context.branchId ? Number(context.branchId) : (quotation.branch_id ? Number(quotation.branch_id) : null);
+      if (!effectiveBranchId) {
+        const [branchRows] = await tx.execute(
+          `
+            SELECT id
+            FROM branches
+            WHERE tenant_id = ?
+              AND is_primary = 1
+            LIMIT 1
+          `,
+          [Number(tenantId)]
+        );
+        effectiveBranchId = branchRows[0]?.id ? Number(branchRows[0].id) : null;
+      }
+
+      const salesOrderNumber = await allocateDocumentNumber({
+        tenantId,
+        branchId: effectiveBranchId,
+        documentType: "sales_order",
+        at: quotation.quote_date,
+        tx
+      });
+
       const [salesOrderResult] = await tx.execute(`
         INSERT INTO sales_orders (
-          sales_order_number, customer_id, order_date, agent_id, payment_term_id,
+          tenant_id, branch_id, sales_order_number, customer_id, order_date, agent_id, payment_term_id,
           status, items_subtotal, discount_type, discount_value, discount_amount,
           total_amount, notes, created_ip, updated_ip
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [
+        tenantId,
+        effectiveBranchId,
         salesOrderNumber,
         quotation.customer_id,
         quotation.quote_date,
@@ -348,10 +411,11 @@ export class QuotationsRepository {
       for (const item of items) {
         await tx.execute(`
           INSERT INTO sales_order_items (
-            sales_order_id, product_id, product_variant_id, product_name, variant_name,
+            tenant_id, sales_order_id, product_id, product_variant_id, product_name, variant_name,
             quantity, unit_price, unit_cost, line_discount, line_total
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
+          tenantId,
           salesOrderId,
           item.product_id,
           item.product_variant_id,
@@ -368,8 +432,8 @@ export class QuotationsRepository {
       await tx.execute(`
         UPDATE quotations
         SET status = 'converted', sales_order_id = ?, converted_at = NOW(), updated_ip = ?
-        WHERE id = ?
-      `, [salesOrderId, ipAddress, id]);
+        WHERE tenant_id = ? AND id = ?
+      `, [salesOrderId, ipAddress, tenantId, id]);
 
       return { id: salesOrderId, salesOrderNumber };
     });

@@ -11,6 +11,10 @@ export class SalesOrdersController {
     return req.auth?.user?.tenantId ?? null;
   }
 
+  getBranchId(req) {
+    return req.auth?.branch?.id ?? null;
+  }
+
   invoicePdf = async (req, res, next) => {
     try {
       const { document, invoiceNumber } = await this.service.createInvoicePdfDocument(this.getTenantId(req), req.params.id);
@@ -104,6 +108,7 @@ export class SalesOrdersController {
   create = async (req, res, next) => {
     try {
       const salesOrder = await this.service.create(this.getTenantId(req), req.body, {
+        branchId: this.getBranchId(req),
         ipAddress: getPersistedRequestIp(req)
       });
       res.status(201).json(

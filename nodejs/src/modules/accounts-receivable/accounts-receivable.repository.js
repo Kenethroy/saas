@@ -1,17 +1,17 @@
 import { query } from "#shared/database/mysql";
 
 export class AccountsReceivableRepository {
-  async findPaginated({ page, perPage, search, status, customerId }) {
+  async findPaginated(tenantId, { page, perPage, search, status, customerId }) {
     const offset = (page - 1) * perPage;
 
     let sql = `
       FROM accounts_receivable ar
-      JOIN customers c ON ar.customer_id = c.id
-      LEFT JOIN invoices i ON ar.invoice_id = i.id
-      LEFT JOIN employees e ON ar.agent_id = e.id
-      WHERE ar.delete_flg = 0
+      JOIN customers c ON ar.customer_id = c.id AND c.tenant_id = ar.tenant_id
+      LEFT JOIN invoices i ON ar.invoice_id = i.id AND i.tenant_id = ar.tenant_id
+      LEFT JOIN employees e ON ar.agent_id = e.id AND e.tenant_id = ar.tenant_id
+      WHERE ar.tenant_id = ? AND ar.delete_flg = 0
     `;
-    const params = [];
+    const params = [tenantId];
 
     if (search) {
       sql += " AND (c.name LIKE ? OR c.company LIKE ? OR i.invoice_number LIKE ?)";
@@ -96,20 +96,20 @@ export class AccountsReceivableRepository {
     return { data: formattedRows, total: countRows[0].total };
   }
 
-  async findById(id) {
+  async findById(tenantId, id) {
     const sql = `
       SELECT ar.*, 
              c.name as customer_name, c.company as customer_company, c.email as customer_email,
              i.invoice_number as invoice_number,
              e.first_name as agent_first_name, e.last_name as agent_last_name
       FROM accounts_receivable ar
-      JOIN customers c ON ar.customer_id = c.id
-      LEFT JOIN invoices i ON ar.invoice_id = i.id
-      LEFT JOIN employees e ON ar.agent_id = e.id
-      WHERE ar.id = ? AND ar.delete_flg = 0
+      JOIN customers c ON ar.customer_id = c.id AND c.tenant_id = ar.tenant_id
+      LEFT JOIN invoices i ON ar.invoice_id = i.id AND i.tenant_id = ar.tenant_id
+      LEFT JOIN employees e ON ar.agent_id = e.id AND e.tenant_id = ar.tenant_id
+      WHERE ar.tenant_id = ? AND ar.id = ? AND ar.delete_flg = 0
       LIMIT 1
     `;
-    const rows = await query(sql, [id]);
+    const rows = await query(sql, [tenantId, id]);
     if (!rows[0]) return null;
 
     const row = rows[0];
@@ -145,7 +145,7 @@ export class AccountsReceivableRepository {
     };
   }
 
-  async update(id, data) {
+  async update(tenantId, id, data) {
     const fields = [];
     const params = [];
 
@@ -170,11 +170,11 @@ export class AccountsReceivableRepository {
       params.push(data.updatedIp);
     }
 
-    if (fields.length === 0) return this.findById(id);
+    if (fields.length === 0) return this.findById(tenantId, id);
 
-    const sql = `UPDATE accounts_receivable SET ${fields.join(", ")} WHERE id = ?`;
-    params.push(id);
+    const sql = `UPDATE accounts_receivable SET ${fields.join(", ")} WHERE tenant_id = ? AND id = ?`;
+    params.push(tenantId, id);
     await query(sql, params);
-    return this.findById(id);
+    return this.findById(tenantId, id);
   }
 }

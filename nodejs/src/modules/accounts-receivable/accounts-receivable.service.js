@@ -28,11 +28,12 @@ export class AccountsReceivableService {
     this.repository = repository;
   }
 
-  async list(filters) {
+  async list(tenantId, filters) {
+    if (!tenantId) throw new AppError("Tenant context is required", 400);
     const page = parseInt(filters.page) || 1;
     const perPage = parseInt(filters.perPage) || 10;
 
-    const result = await this.repository.findPaginated({
+    const result = await this.repository.findPaginated(tenantId, {
       search: filters.search,
       status: filters.status,
       customerId: filters.customerId,
@@ -51,14 +52,18 @@ export class AccountsReceivableService {
     };
   }
 
-  async getById(id) {
-    const ar = await this.repository.findById(id);
+  async getById(tenantId, id) {
+    if (!tenantId) throw new AppError("Tenant context is required", 400);
+    const ar = await this.repository.findById(tenantId, id);
     if (!ar) throw new AppError("Accounts Receivable record not found", 404);
     return normalizeAR(ar);
   }
 
   async update(id, payload, context = {}) {
-    const existing = await this.repository.findById(id);
+    const tenantId = context.tenantId;
+    if (!tenantId) throw new AppError("Tenant context is required", 400);
+
+    const existing = await this.repository.findById(tenantId, id);
     if (!existing) throw new AppError("Accounts Receivable record not found", 404);
 
     if (payload.amount !== undefined && existing.paidAmount > 0) {
@@ -70,7 +75,7 @@ export class AccountsReceivableService {
       outstandingAmount = payload.amount - existing.paidAmount;
     }
 
-    const ar = await this.repository.update(id, {
+    const ar = await this.repository.update(tenantId, id, {
       ...payload,
       outstandingAmount,
       updatedIp: context.ipAddress ?? null

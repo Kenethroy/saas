@@ -40,6 +40,7 @@ import { onboardingRoutes } from "#modules/onboarding/onboarding.routes";
 import { subscriptionsRoutes } from "#modules/subscriptions/subscriptions.routes";
 import { billingRoutes } from "#modules/billing/billing.routes";
 import { tenantsRoutes } from "#modules/tenants/tenants.routes";
+import { platformAdminRoutes } from "#modules/platform-admin/platform-admin.routes";
 
 export function createApp() {
   const app = express();
@@ -108,12 +109,14 @@ export function createApp() {
   app.use("/platform/tenants", tenantsRoutes);
   app.use("/platform", subscriptionsRoutes);
   app.use("/platform", billingRoutes);
+  app.use("/platform/admin", platformAdminRoutes);
   app.use("/api/platform/auth", platformAuthRoutes);
   app.use("/api/platform/accounts", platformAccountsRoutes);
   app.use("/api/platform/onboarding", onboardingRoutes);
   app.use("/api/platform/tenants", tenantsRoutes);
   app.use("/api/platform", subscriptionsRoutes);
   app.use("/api/platform", billingRoutes);
+  app.use("/api/platform/admin", platformAdminRoutes);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

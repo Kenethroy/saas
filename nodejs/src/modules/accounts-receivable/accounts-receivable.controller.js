@@ -9,7 +9,8 @@ export class AccountsReceivableController {
 
   list = async (req, res, next) => {
     try {
-      const result = await this.service.list(req.query);
+      const tenantId = req.auth?.user?.tenantId;
+      const result = await this.service.list(tenantId, req.query);
       res.status(200).json({
         success: true,
         data: result.data,
@@ -22,7 +23,8 @@ export class AccountsReceivableController {
 
   getById = async (req, res, next) => {
     try {
-      const data = await this.service.getById(req.params.id);
+      const tenantId = req.auth?.user?.tenantId;
+      const data = await this.service.getById(tenantId, req.params.id);
       res.status(200).json({
         success: true,
         data
@@ -34,7 +36,9 @@ export class AccountsReceivableController {
 
   update = async (req, res, next) => {
     try {
+      const tenantId = req.auth?.user?.tenantId;
       const data = await this.service.update(req.params.id, req.body, {
+        tenantId,
         ipAddress: getPersistedRequestIp(req)
       });
       res.status(200).json({

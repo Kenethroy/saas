@@ -49,10 +49,6 @@ function assertSalesOrderEditable(status) {
   }
 }
 
-function formatOrderNumber(id) {
-  return `SO-${String(id).padStart(6, "0")}`;
-}
-
 function normalizeSalesOrder(record) {
   const itemCount = record._count?.items ?? record.itemCount ?? record.items?.length ?? 0;
 
@@ -185,6 +181,7 @@ export class SalesOrdersService {
 
   async create(tenantId, payload, context = {}) {
     const scopedTenantId = requireTenantId(tenantId);
+    const branchId = context.branchId ? Number(context.branchId) : null;
     const customer = await this.repository.findCustomerById(scopedTenantId, payload.customerId);
     if (!customer) throw new AppError("Customer not found", 404);
 
@@ -211,15 +208,11 @@ export class SalesOrdersService {
     if (discountAmount > itemsSubtotal) discountAmount = itemsSubtotal;
     const totalAmount = itemsSubtotal - discountAmount;
 
-    const latestOrder = await this.repository.findLatestOrder(scopedTenantId);
-    const nextId = Number(latestOrder?.id ?? 0) + 1;
-    const salesOrderNumber = formatOrderNumber(nextId);
-
     const ipAddress = context.ipAddress ?? null;
 
     const created = await this.repository.createWithItems({
       tenantId: scopedTenantId,
-      salesOrderNumber,
+      branchId,
       customerId: payload.customerId,
       orderDate: new Date(payload.orderDate),
       agentId: payload.agentId || null,

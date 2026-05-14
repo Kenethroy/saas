@@ -35,6 +35,8 @@ export async function authenticatePlatformAccount(req, res, next) {
       });
     }
 
+    const roles = await repository.listActiveRolesByAccountId(account.id);
+
     req.auth = {
       ...(req.auth ?? {}),
       token,
@@ -43,7 +45,8 @@ export async function authenticatePlatformAccount(req, res, next) {
         email: account.email,
         firstName: account.firstName,
         lastName: account.lastName,
-        status: account.status
+        status: account.status,
+        roles
       }
     };
 

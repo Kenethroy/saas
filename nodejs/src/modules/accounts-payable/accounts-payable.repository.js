@@ -1,16 +1,16 @@
 import { query } from "#shared/database/mysql";
 
 export class AccountsPayableRepository {
-  async findPaginated({ page, perPage, search, status, supplierId, overdue }) {
+  async findPaginated(tenantId, { page, perPage, search, status, supplierId, overdue }) {
     const offset = (page - 1) * perPage;
 
     let sql = `
       FROM accounts_payable ap
-      JOIN suppliers s ON ap.supplier_id = s.id
-      JOIN purchase_orders po ON ap.purchase_order_id = po.id
-      WHERE ap.delete_flg = 0
+      JOIN suppliers s ON ap.supplier_id = s.id AND s.tenant_id = ap.tenant_id
+      JOIN purchase_orders po ON ap.purchase_order_id = po.id AND po.tenant_id = ap.tenant_id
+      WHERE ap.tenant_id = ? AND ap.delete_flg = 0
     `;
-    const params = [];
+    const params = [tenantId];
 
     if (search) {
       sql += " AND (ap.po_number LIKE ? OR s.name LIKE ?)";
@@ -83,7 +83,7 @@ export class AccountsPayableRepository {
     return { data: formattedRows, total: countRows[0].total };
   }
 
-  async findById(id) {
+  async findById(tenantId, id) {
     const sql = `
       SELECT ap.*, 
              s.name as supplier_name, s.company_name as supplier_company_name, 
@@ -91,12 +91,12 @@ export class AccountsPayableRepository {
              po.po_number as order_po_number, po.order_date as order_date, 
              po.total_amount as order_total_amount, po.received_total as order_received_total
       FROM accounts_payable ap
-      JOIN suppliers s ON ap.supplier_id = s.id
-      JOIN purchase_orders po ON ap.purchase_order_id = po.id
-      WHERE ap.id = ? AND ap.delete_flg = 0
+      JOIN suppliers s ON ap.supplier_id = s.id AND s.tenant_id = ap.tenant_id
+      JOIN purchase_orders po ON ap.purchase_order_id = po.id AND po.tenant_id = ap.tenant_id
+      WHERE ap.tenant_id = ? AND ap.id = ? AND ap.delete_flg = 0
       LIMIT 1
     `;
-    const rows = await query(sql, [id]);
+    const rows = await query(sql, [tenantId, id]);
     if (!rows[0]) return null;
 
     const row = rows[0];
@@ -131,7 +131,7 @@ export class AccountsPayableRepository {
     };
   }
 
-  async findByPoId(purchaseOrderId) {
+  async findByPoId(tenantId, purchaseOrderId) {
     const sql = `
       SELECT ap.*, 
              s.name as supplier_name, s.company_name as supplier_company_name, 
@@ -139,12 +139,12 @@ export class AccountsPayableRepository {
              po.po_number as order_po_number, po.order_date as order_date, 
              po.total_amount as order_total_amount, po.received_total as order_received_total
       FROM accounts_payable ap
-      JOIN suppliers s ON ap.supplier_id = s.id
-      JOIN purchase_orders po ON ap.purchase_order_id = po.id
-      WHERE ap.purchase_order_id = ? AND ap.delete_flg = 0
+      JOIN suppliers s ON ap.supplier_id = s.id AND s.tenant_id = ap.tenant_id
+      JOIN purchase_orders po ON ap.purchase_order_id = po.id AND po.tenant_id = ap.tenant_id
+      WHERE ap.tenant_id = ? AND ap.purchase_order_id = ? AND ap.delete_flg = 0
       LIMIT 1
     `;
-    const rows = await query(sql, [purchaseOrderId]);
+    const rows = await query(sql, [tenantId, purchaseOrderId]);
     if (!rows[0]) return null;
 
     const row = rows[0];
@@ -179,23 +179,24 @@ export class AccountsPayableRepository {
     };
   }
 
-  async create(data) {
+  async create(tenantId, data) {
     const sql = `
       INSERT INTO accounts_payable (
-        purchase_order_id, supplier_id, po_number, receipt_date, due_date,
+        tenant_id, purchase_order_id, supplier_id, po_number, receipt_date, due_date,
         amount, paid_amount, outstanding_amount, status, notes,
         delete_flg, created_ip, updated_ip
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
     `;
     const result = await query(sql, [
-      data.purchaseOrderId, data.supplierId, data.poNumber, data.receiptDate, data.dueDate || null,
+      tenantId, data.purchaseOrderId, data.supplierId, data.poNumber, data.receiptDate, data.dueDate || null,
       data.amount, data.paidAmount || 0, data.outstandingAmount, data.status || 'unpaid', data.notes || null,
       data.createdIp || null, data.updatedIp || null
     ]);
-    return this.findById(result.insertId);
+    return this.findById(tenantId, result.insertId);
   }
 
   async update(id, data) {
+    const tenantId = data.tenantId;
     const fields = [];
     const params = [];
 
@@ -224,11 +225,11 @@ export class AccountsPayableRepository {
       params.push(data.updatedIp);
     }
 
-    if (fields.length === 0) return this.findById(id);
+    if (fields.length === 0) return this.findById(tenantId, id);
 
-    const sql = `UPDATE accounts_payable SET ${fields.join(", ")} WHERE id = ?`;
-    params.push(id);
+    const sql = `UPDATE accounts_payable SET ${fields.join(", ")} WHERE tenant_id = ? AND id = ?`;
+    params.push(tenantId, id);
     await query(sql, params);
-    return this.findById(id);
+    return this.findById(tenantId, id);
   }
 }

@@ -31,11 +31,12 @@ export class AccountsPayableService {
     this.repository = repository;
   }
 
-  async list(filters) {
+  async list(tenantId, filters) {
+    if (!tenantId) throw new AppError("Tenant context is required", 400);
     const page = parseInt(filters.page) || 1;
     const perPage = parseInt(filters.perPage) || 15;
 
-    const result = await this.repository.findPaginated({
+    const result = await this.repository.findPaginated(tenantId, {
       search: filters.search,
       status: filters.status,
       supplierId: filters.supplierId,
@@ -55,14 +56,18 @@ export class AccountsPayableService {
     };
   }
 
-  async getById(id) {
-    const ap = await this.repository.findById(id);
+  async getById(tenantId, id) {
+    if (!tenantId) throw new AppError("Tenant context is required", 400);
+    const ap = await this.repository.findById(tenantId, id);
     if (!ap) throw new AppError("Accounts Payable record not found", 404);
     return normalizeAP(ap);
   }
 
   async update(id, payload, context = {}) {
-    const existing = await this.repository.findById(id);
+    const tenantId = context.tenantId;
+    if (!tenantId) throw new AppError("Tenant context is required", 400);
+
+    const existing = await this.repository.findById(tenantId, id);
     if (!existing) throw new AppError("Accounts Payable record not found", 404);
 
     if (payload.amount !== undefined && Number(existing.paidAmount) > 0) {
@@ -77,7 +82,8 @@ export class AccountsPayableService {
     const ap = await this.repository.update(id, {
       ...payload,
       outstandingAmount,
-      updatedIp: context.ipAddress ?? null
+      updatedIp: context.ipAddress ?? null,
+      tenantId
     });
 
     return normalizeAP(ap);

@@ -6,18 +6,20 @@ export class StockAdjustmentsService {
     this.repository = repository;
   }
 
-  async list(filters) {
+  async list(tenantId, filters, context = {}) {
+    if (!tenantId) throw new AppError("Tenant context is required", 400);
     const page = filters.page ?? 1;
     const perPage = filters.perPage ?? 10;
     const sortOrder = String(filters.sortOrder ?? "desc").toLowerCase() === "asc" ? "ASC" : "DESC";
 
-    const { rows, total } = await this.repository.findPaginated({
+    const { rows, total } = await this.repository.findPaginated(tenantId, {
       page,
       perPage,
       search: filters.search,
       status: filters.status,
       reason: filters.reason,
-      sortOrder
+      sortOrder,
+      branchId: context.branchId ?? null
     });
 
     return {
@@ -31,12 +33,13 @@ export class StockAdjustmentsService {
     };
   }
 
-  async getById(id) {
-    const header = await this.repository.findById(id);
+  async getById(tenantId, id) {
+    if (!tenantId) throw new AppError("Tenant context is required", 400);
+    const header = await this.repository.findById(tenantId, id);
     if (!header) throw new AppError("Stock adjustment not found", 404);
 
     const variantIds = header.items.map(item => item.productVariantId);
-    const variants = await this.repository.findProductVariantsByIds(variantIds);
+    const variants = await this.repository.findProductVariantsByIds(tenantId, variantIds);
     const variantMap = new Map(variants.map(v => [v.id, v]));
 
     header.items = header.items.map(item => {
@@ -54,46 +57,52 @@ export class StockAdjustmentsService {
   }
 
   async create(payload, context = {}) {
+    if (!context?.tenantId) throw new AppError("Tenant context is required", 400);
     const header = await this.repository.create(payload, context);
     if (!header) {
       throw new AppError("Stock adjustment not found", 404);
     }
-    return this.getById(header.id);
+    return this.getById(context.tenantId, header.id);
   }
 
   async update(id, payload, context = {}) {
-    const header = await this.repository.update(id, payload, context);
+    if (!context?.tenantId) throw new AppError("Tenant context is required", 400);
+    const header = await this.repository.update(context.tenantId, id, payload, context);
     if (!header) {
       throw new AppError("Stock adjustment not found", 404);
     }
-    return this.getById(header.id);
+    return this.getById(context.tenantId, header.id);
   }
 
-  async submit(id, context = {}) {
-    const header = await this.repository.submit(id, context);
+  async submit(tenantId, id, context = {}) {
+    if (!tenantId) throw new AppError("Tenant context is required", 400);
+    const header = await this.repository.submit(tenantId, id, context);
     if (!header) {
       throw new AppError("Stock adjustment not found", 404);
     }
-    return this.getById(header.id);
+    return this.getById(tenantId, header.id);
   }
 
-  async approve(id, context = {}) {
-    const header = await this.repository.approve(id, context);
+  async approve(tenantId, id, context = {}) {
+    if (!tenantId) throw new AppError("Tenant context is required", 400);
+    const header = await this.repository.approve(tenantId, id, context);
     if (!header) {
       throw new AppError("Stock adjustment not found", 404);
     }
-    return this.getById(header.id);
+    return this.getById(tenantId, header.id);
   }
 
-  async reject(id, reason, context = {}) {
-    const header = await this.repository.reject(id, reason, context);
+  async reject(tenantId, id, reason, context = {}) {
+    if (!tenantId) throw new AppError("Tenant context is required", 400);
+    const header = await this.repository.reject(tenantId, id, reason, context);
     if (!header) {
       throw new AppError("Stock adjustment not found", 404);
     }
-    return this.getById(header.id);
+    return this.getById(tenantId, header.id);
   }
 
-  async delete(id, context = {}) {
-    await this.repository.delete(id, context);
+  async delete(tenantId, id, context = {}) {
+    if (!tenantId) throw new AppError("Tenant context is required", 400);
+    await this.repository.delete(tenantId, id, context);
   }
 }

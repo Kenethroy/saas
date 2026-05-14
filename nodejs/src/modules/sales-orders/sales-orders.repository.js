@@ -1,5 +1,6 @@
 import { query, transaction } from "#shared/database/mysql";
 import { deliverSalesOrder } from "#modules/sales-orders/sales-orders.delivery";
+import { allocateDocumentNumber } from "#shared/utils/document-sequences";
 
 export class SalesOrdersRepository {
   async findPaginated(tenantId, { page, perPage, search, status }) {
@@ -293,6 +294,29 @@ export class SalesOrdersRepository {
 
   async createWithItems(soData, items) {
     return transaction(async (tx) => {
+      let effectiveBranchId = soData.branchId ? Number(soData.branchId) : null;
+      if (!effectiveBranchId) {
+        const [branchRows] = await tx.execute(
+          `
+            SELECT id
+            FROM branches
+            WHERE tenant_id = ?
+              AND is_primary = 1
+            LIMIT 1
+          `,
+          [Number(soData.tenantId)]
+        );
+        effectiveBranchId = branchRows[0]?.id ? Number(branchRows[0].id) : null;
+      }
+
+      const salesOrderNumber = soData.salesOrderNumber || await allocateDocumentNumber({
+        tenantId: soData.tenantId,
+        branchId: effectiveBranchId,
+        documentType: "sales_order",
+        at: soData.orderDate,
+        tx
+      });
+
       const pSql = `
     INSERT INTO sales_orders (
       tenant_id, branch_id, sales_order_number, customer_id, agent_id, order_date, payment_term_id,
@@ -300,7 +324,7 @@ export class SalesOrdersRepository {
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `;
       const [pResult] = await tx.execute(pSql, [
-        soData.tenantId, soData.branchId || null, soData.salesOrderNumber, soData.customerId, soData.agentId || null,
+        soData.tenantId, effectiveBranchId, salesOrderNumber, soData.customerId, soData.agentId || null,
         soData.orderDate, soData.paymentTermId || null,
         soData.itemsSubtotal, soData.discountType || 'none', soData.discountValue || 0,
         soData.discountAmount || 0, soData.totalAmount, soData.notes || null,
