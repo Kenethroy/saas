@@ -1,0 +1,472 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color: #1a3557;
+  background: #eaf1f6;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  color: #1a3557;
+  background:
+    radial-gradient(circle at top right, rgba(144, 202, 249, 0.12), transparent 24%),
+    linear-gradient(180deg, #edf3f8 0%, #e7eef4 100%);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scan-laser {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 6px;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    rgba(52, 211, 153, 0.6),
+    rgba(52, 211, 153, 0.9),
+    rgba(52, 211, 153, 0.6),
+    transparent
+  );
+  box-shadow: 0 0 8px 2px rgba(52, 211, 153, 0.7);
+  animation: laserMove 2s linear infinite;
+}
+
+@keyframes laserMove {
+  0% {
+    top: 0%;
+  }
+
+  50% {
+    top: 90%;
+  }
+
+  100% {
+    top: 0%;
+  }
+}
+
+@layer components {
+  .app-shell-card {
+    @apply rounded-sm border border-border bg-panel shadow-[0_1px_1px_rgba(26,53,87,0.04)];
+  }
+
+  .page-title {
+    @apply text-[18px] font-bold tracking-[0.01em] text-ink;
+  }
+
+  .page-subtitle {
+    @apply text-[13px] text-muted;
+  }
+
+  .table-card {
+    @apply app-shell-card overflow-hidden;
+  }
+
+  .table-toolbar {
+    @apply flex flex-col gap-2.5 border-b border-border bg-[#f6f9fc] px-4 py-2.5 md:flex-row md:items-center md:justify-between;
+  }
+
+  .erp-label {
+    @apply mb-1 block text-[11px] font-bold uppercase tracking-[0.4px] text-muted;
+  }
+
+  .erp-input {
+    @apply h-9 w-full rounded-sm border border-border bg-[#fcfdff] px-3 py-1.5 text-[13px] text-[#1d2730] outline-none transition focus:border-accent-500 focus:ring-2 focus:ring-accent-500/10;
+  }
+
+  .erp-input-error {
+    @apply border-[#c62828] focus:border-[#c62828] focus:ring-[#c62828]/10;
+  }
+
+  .erp-select {
+    @apply erp-input pr-8;
+  }
+
+  .erp-date-picker-trigger {
+    @apply flex w-full items-center justify-between overflow-hidden rounded-sm border border-border bg-[#fcfdff] pl-3 pr-0 text-left text-[12px] outline-none transition hover:border-[#9eb9d0] focus:border-accent-500 focus:ring-2 focus:ring-accent-500/10 disabled:cursor-not-allowed disabled:opacity-70;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  }
+
+  .erp-date-picker-trigger-error {
+    @apply border-[#c62828] focus:border-[#c62828] focus:ring-[#c62828]/10;
+  }
+
+  .erp-date-picker-icon {
+    @apply inline-flex h-[34px] w-10 shrink-0 items-center justify-center border-l border-[#dbe6ee] bg-[#f3f7fb] text-[#5f7b93];
+  }
+
+  .erp-date-picker-popper {
+    z-index: 60;
+  }
+
+  .erp-date-picker-calendar {
+    background: #ffffff !important;
+    border: 1px solid #c9d6e2 !important;
+    border-radius: 4px !important;
+    box-shadow: 0 14px 30px rgba(26, 53, 87, 0.16) !important;
+    font-family: inherit !important;
+    overflow: hidden !important;
+  }
+
+  .erp-date-picker-calendar .react-datepicker,
+  .erp-date-picker-calendar .react-datepicker__month-container,
+  .erp-date-picker-calendar .react-datepicker__month,
+  .erp-date-picker-calendar .react-datepicker__week {
+    background: #ffffff !important;
+  }
+
+  .erp-date-picker-calendar .react-datepicker__header {
+    background: linear-gradient(180deg, #2c5f8a 0%, #1f4f78 100%) !important;
+    border-bottom: 0 !important;
+    padding-top: 10px !important;
+  }
+
+  .erp-date-picker-calendar .react-datepicker__current-month,
+  .erp-date-picker-calendar .react-datepicker-time__header,
+  .erp-date-picker-calendar .react-datepicker-year-header {
+    color: #ffffff !important;
+    font-size: 13px !important;
+    font-weight: 700 !important;
+  }
+
+  .erp-date-picker-calendar .react-datepicker__day-name {
+    color: #b9d6ee !important;
+    font-size: 10px !important;
+    font-weight: 700 !important;
+    text-transform: uppercase;
+  }
+
+  .erp-date-picker-calendar .react-datepicker__navigation {
+    top: 10px !important;
+  }
+
+  .erp-date-picker-calendar .react-datepicker__navigation-icon::before {
+    border-color: #d9ecfb !important;
+  }
+
+  .erp-date-picker-calendar .react-datepicker__month {
+    margin: 0.65rem !important;
+  }
+
+  .erp-date-picker-calendar .react-datepicker__day {
+    border-radius: 4px !important;
+    color: #1a3557 !important;
+    font-weight: 600 !important;
+    transition: background-color 120ms ease, color 120ms ease;
+  }
+
+  .erp-date-picker-calendar .react-datepicker__day:hover {
+    background: #e8f1f8 !important;
+    color: #0070b8 !important;
+  }
+
+  .erp-date-picker-calendar .react-datepicker__day--keyboard-selected {
+    background: #d9e9f6 !important;
+    color: #1a3557 !important;
+  }
+
+  .erp-date-picker-calendar .react-datepicker__day--selected,
+  .erp-date-picker-calendar .react-datepicker__day--in-selecting-range,
+  .erp-date-picker-calendar .react-datepicker__day--in-range {
+    background: #0070b8 !important;
+    color: #ffffff !important;
+  }
+
+  .erp-date-picker-calendar .react-datepicker__day--today {
+    box-shadow: inset 0 0 0 1px #0070b8;
+  }
+
+  .erp-date-picker-calendar .react-datepicker__day--disabled {
+    color: #b0bec5 !important;
+  }
+
+  .erp-textarea {
+    @apply erp-input min-h-[84px] resize-y;
+  }
+
+  .erp-button-primary {
+    @apply rounded-sm bg-accent-500 px-3.5 py-1.5 text-[11px] font-bold text-white transition hover:bg-accent-600 disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .erp-button-secondary {
+    @apply rounded-sm border border-border bg-[#fbfdff] px-3.5 py-1.5 text-[11px] font-bold text-ink transition hover:bg-[#eef5fa];
+  }
+
+  .erp-header-secondary-button {
+    @apply inline-flex items-center justify-center rounded-sm border border-[#b7c8d6] bg-white px-3.5 py-1.5 text-[11px] font-bold text-[#1a3557] transition hover:border-[#8fb1c9] hover:bg-[#eef5fa] disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .erp-button-danger {
+    @apply rounded-sm border border-[#ef9a9a] bg-white px-3 py-1.5 text-[11px] font-bold text-[#c62828] transition hover:bg-[#fff5f5];
+  }
+
+  .erp-stat-card {
+    @apply app-shell-card bg-[#f8fbfd] p-4;
+  }
+
+  .erp-modal-panel {
+    @apply w-full overflow-hidden rounded-sm border border-border bg-[#fbfdff] shadow-paper;
+  }
+
+  .erp-error-bar {
+    @apply flex items-center gap-2 border-b border-[#ef9a9a] bg-[#fce4e4] px-5 py-2 text-[12px] text-[#c62828];
+  }
+
+  .erp-sidebar-body {
+    background: #1a3557;
+  }
+
+  .erp-sidebar-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(100, 181, 246, 0.35) transparent;
+  }
+
+  .erp-sidebar-scroll::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .erp-sidebar-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .erp-sidebar-scroll::-webkit-scrollbar-thumb {
+    background: rgba(100, 181, 246, 0.35);
+    border-radius: 999px;
+  }
+
+  .erp-sidebar-scroll::-webkit-scrollbar-thumb:hover {
+    background: rgba(100, 181, 246, 0.5);
+  }
+
+  .erp-table {
+    @apply min-w-full border-collapse;
+  }
+
+  .erp-table thead {
+    @apply border-b border-[#9fb3c2] bg-[#2c5f8a];
+  }
+
+  .erp-table th {
+    @apply px-3.5 py-2 text-left text-[11px] font-bold uppercase tracking-[0.35px] text-white;
+  }
+
+  .erp-table td {
+    @apply px-3.5 py-2 text-[12px] align-top text-[#1d2730];
+  }
+
+  .erp-table tbody tr {
+    @apply border-t border-[#d3dee7] bg-[#fbfdff];
+  }
+
+  .erp-table tbody tr:nth-child(even) {
+    @apply bg-[#f7fbfe];
+  }
+
+  .erp-table tbody tr:hover {
+    @apply bg-[#edf5fb];
+  }
+
+  .erp-content-surface {
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.3), rgba(255, 255, 255, 0)),
+      #eaf1f6;
+  }
+
+  .erp-page-section {
+    @apply overflow-hidden rounded-sm border border-[#c9d6e2] bg-white shadow-[0_1px_1px_rgba(26,53,87,0.04)];
+  }
+
+  .erp-page-main-card {
+    @apply app-shell-card;
+  }
+
+  .erp-page-section:has(+ .erp-page-main-card),
+  .erp-page-section:has(+ .erp-form-stack > .erp-page-main-card:first-child),
+  .erp-page-section:has(+ .table-card) {
+    border-bottom: 0;
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+    box-shadow: none;
+  }
+
+  .erp-page-section + .erp-page-main-card,
+  .erp-page-section + .table-card {
+    margin-top: -1px !important;
+    border-top: 0;
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+    box-shadow: 0 1px 1px rgba(26, 53, 87, 0.04);
+  }
+
+  .erp-page-section + .erp-form-stack {
+    margin-top: 0 !important;
+  }
+
+  .erp-page-section + .erp-form-stack > .erp-page-main-card:first-child {
+    margin-top: -1px !important;
+    border-top: 0;
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+    box-shadow: 0 1px 1px rgba(26, 53, 87, 0.04);
+  }
+
+  .erp-page-section-joined {
+    border-bottom: 0;
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+    box-shadow: none;
+  }
+
+  .erp-page-main-card-joined {
+    margin-top: -1px !important;
+    border-top: 0;
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+    box-shadow: 0 1px 1px rgba(26, 53, 87, 0.04);
+  }
+
+  .erp-page-header {
+    @apply flex flex-col gap-2.5 border-b border-[#d7e3ec] bg-[#f8fbfd] px-4 py-3 md:flex-row md:items-center md:justify-between;
+  }
+
+  .erp-page-header-meta {
+    @apply flex items-center gap-2.5;
+  }
+
+  .erp-page-title {
+    @apply text-[15px] font-bold text-ink;
+  }
+
+  .erp-page-description {
+    @apply mt-0.5 text-[12px] text-muted;
+  }
+
+  .erp-page-filters {
+    @apply flex flex-col gap-2.5 border-b border-[#d7e3ec] bg-[#f9fbfe] px-4 py-2.5 md:flex-row md:flex-wrap md:items-center;
+  }
+
+  .erp-filter-label {
+    @apply text-[11px] font-bold uppercase tracking-[0.4px] text-[#3f6786];
+  }
+
+  .erp-row-actions {
+    @apply flex items-center justify-end gap-1.5;
+  }
+
+  .erp-chip {
+    @apply rounded-sm border px-1.5 py-0.5 text-[10px] font-bold uppercase;
+  }
+
+  .erp-status-badge {
+    @apply inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-semibold leading-none whitespace-nowrap;
+  }
+
+  .erp-status-badge-dot {
+    @apply inline-block h-1.5 w-1.5 rounded-full bg-current opacity-80;
+  }
+
+  .erp-entity-card {
+    @apply rounded-sm border border-[#d7e3ec] bg-white p-4 transition;
+    box-shadow: 0 1px 1px rgba(26, 53, 87, 0.035);
+  }
+
+  .erp-entity-card:hover {
+    border-color: #bfd0de;
+    box-shadow: 0 3px 10px rgba(26, 53, 87, 0.055);
+  }
+
+  .erp-entity-card-panel {
+    @apply rounded-sm border border-[#e6edf3] bg-[#fbfdff] p-3;
+  }
+
+  .erp-entity-card-muted-panel {
+    @apply rounded-sm border border-[#e6edf3] bg-[#fcfdff] p-3 text-[10px] text-[#607d8b];
+  }
+
+  .erp-icon-button {
+    @apply inline-flex h-7 w-7 items-center justify-center rounded-sm border border-[#b0bec5] bg-white text-[#546e7a] transition hover:border-[#0070b8] hover:bg-[#edf5fb] hover:text-[#0070b8];
+  }
+
+  .erp-table-action-button {
+    @apply inline-flex items-center justify-center rounded-sm border border-[#b0bec5] bg-white px-2.5 py-1 text-[11px] font-bold text-[#1a3557] transition hover:border-[#0070b8] hover:bg-[#edf5fb] hover:text-[#0070b8];
+  }
+
+  .erp-status-select {
+    @apply h-7 rounded-sm border border-[#b0bec5] bg-white px-2 text-[11px] font-bold text-[#1a3557] outline-none transition focus:border-[#0070b8];
+  }
+
+  .erp-empty-state {
+    @apply flex min-h-[220px] items-center justify-center text-[12px] italic text-[#90a4ae];
+  }
+
+  .erp-header-primary-button {
+    @apply erp-button-primary;
+  }
+
+  .erp-filter-clear-button {
+    @apply rounded-sm border border-[#b0bec5] bg-transparent px-3 py-1.5 text-[11px] text-[#546e7a] transition hover:bg-[#fce4e4] hover:text-[#c62828];
+  }
+
+  .erp-back-button {
+    @apply inline-flex h-8 w-8 items-center justify-center rounded-sm border border-[#5e87ad] bg-[#1f4c74] text-white transition hover:bg-[#1a4062];
+  }
+
+  .erp-icon-button-md {
+    @apply inline-flex h-8 w-8 items-center justify-center rounded-sm border border-[#b0bec5] bg-white text-[#546e7a] transition hover:border-[#0070b8] hover:bg-[#eef5fa] hover:text-[#0070b8];
+  }
+
+  .erp-icon-button-danger {
+    @apply inline-flex h-7 w-7 items-center justify-center rounded-sm border border-[#ef9a9a] bg-white text-[#c62828] transition hover:bg-[#fff5f5];
+  }
+
+  .erp-icon-button-danger-md {
+    @apply inline-flex h-8 w-8 items-center justify-center rounded-sm border border-[#ef9a9a] bg-white text-[#c62828] transition hover:bg-[#fff5f5];
+  }
+
+  .erp-icon-button-warning {
+    @apply inline-flex h-7 w-7 items-center justify-center rounded-sm border border-[#b0bec5] bg-white text-[#546e7a] transition hover:bg-[#fff8e1] hover:border-[#f57f17] hover:text-[#f57f17];
+  }
+
+  .erp-icon-button-warning-md {
+    @apply inline-flex h-8 w-8 items-center justify-center rounded-sm border border-[#b0bec5] bg-white text-[#546e7a] transition hover:border-[#f57f17] hover:bg-[#fff8e1] hover:text-[#f57f17];
+  }
+
+  .erp-icon-button-violet {
+    @apply inline-flex h-7 w-7 items-center justify-center rounded-sm border border-[#b0bec5] bg-white text-[#546e7a] transition hover:bg-[#f3e5f5] hover:border-[#6a1b9a] hover:text-[#6a1b9a];
+  }
+
+  .erp-icon-button-purple {
+    @apply inline-flex h-7 w-7 items-center justify-center rounded-sm border border-[#b0bec5] bg-white text-[#546e7a] transition hover:bg-[#ede7f6] hover:border-[#4527a0] hover:text-[#4527a0];
+  }
+
+  .erp-icon-button-success {
+    @apply inline-flex h-7 w-7 items-center justify-center rounded-sm border border-[#b0bec5] bg-white text-[#546e7a] transition hover:bg-[#e8f5e9] hover:border-[#2e7d32] hover:text-[#2e7d32];
+  }
+
+  .erp-stepper-button-left {
+    @apply inline-flex h-8 w-8 items-center justify-center border-r border-[#d3dee7] bg-[#f3f6f9] text-[10px] text-[#546e7a] transition hover:bg-[#e8f1f8] hover:text-[#0070b8] disabled:cursor-not-allowed disabled:bg-[#f9fafc] disabled:text-[#b0bec5];
+  }
+
+  .erp-stepper-button-right {
+    @apply inline-flex h-8 w-8 items-center justify-center border-l border-[#d3dee7] bg-[#f3f6f9] text-[10px] text-[#546e7a] transition hover:bg-[#e8f1f8] hover:text-[#0070b8] disabled:cursor-not-allowed disabled:bg-[#f9fafc] disabled:text-[#b0bec5];
+  }
+}

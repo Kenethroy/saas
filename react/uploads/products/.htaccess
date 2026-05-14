@@ -1,0 +1,8 @@
+# Prevent PHP execution
+php_flag engine off
+
+# Allow image access
+<FilesMatch "\.(jpg|jpeg|png|gif|webp)$">
+    Order Allow,Deny
+    Allow from all
+</FilesMatch>
