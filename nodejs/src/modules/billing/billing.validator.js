@@ -27,6 +27,12 @@ export const checkoutBillingSchema = z.object({
   primaryBranchName: z.string().trim().min(1).max(150).optional()
 });
 
+export const confirmCheckoutBillingSchema = z.object({
+  provider: z.enum(["stripe", "xendit"]).default("stripe"),
+  referenceId: z.string().trim().min(1).max(255),
+  paymentSessionId: z.string().trim().min(1).max(255).optional()
+});
+
 export const xenditWebhookSchema = z.object({
   event: z.string().trim().min(1),
   created: z.string().trim().optional(),

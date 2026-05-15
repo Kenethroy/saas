@@ -54,6 +54,7 @@ function normalizeSalesOrder(record) {
 
   return {
     id: Number(record.id),
+    branchId: record.branchId ? Number(record.branchId) : null,
     salesOrderNumber: record.salesOrderNumber,
     customerId: Number(record.customerId),
     orderDate: record.orderDate,
@@ -145,7 +146,7 @@ export class SalesOrdersService {
     this.repository = repository;
   }
 
-  async list(tenantId, filters) {
+  async list(tenantId, filters, context = {}) {
     const scopedTenantId = requireTenantId(tenantId);
     const page = parseInt(filters.page) || 1;
     const perPage = parseInt(filters.perPage) || 10;
@@ -153,7 +154,8 @@ export class SalesOrdersService {
       page,
       perPage,
       search: filters.search,
-      status: filters.status
+      status: filters.status,
+      branchId: context.branchId ?? null
     });
 
     return {
@@ -174,8 +176,10 @@ export class SalesOrdersService {
     return this._decorateOrderWithStockCoverage(scopedTenantId, normalizeSalesOrder(salesOrder));
   }
 
-  async listForDeliverySelection(tenantId) {
-    const rows = await this.repository.findForDeliverySelection(requireTenantId(tenantId));
+  async listForDeliverySelection(tenantId, context = {}) {
+    const rows = await this.repository.findForDeliverySelection(requireTenantId(tenantId), {
+      branchId: context.branchId ?? null
+    });
     return rows.map(normalizeSalesOrderSelection);
   }
 
@@ -195,7 +199,7 @@ export class SalesOrdersService {
       if (!paymentTerm) throw new AppError("Payment term not found", 404);
     }
 
-    const normalizedItems = await this._resolveSalesOrderItems(scopedTenantId, payload.items);
+    const normalizedItems = await this._resolveSalesOrderItems(scopedTenantId, payload.items, { branchId });
     const itemsSubtotal = normalizedItems.reduce((sum, item) => sum + item.lineTotal, 0);
     let discountAmount = 0;
 
@@ -252,6 +256,7 @@ export class SalesOrdersService {
     }
 
     const normalizedItems = await this._resolveSalesOrderItems(scopedTenantId, payload.items, {
+      branchId: existing.branchId ?? null,
       enforceAvailableStock: existing.status === "processing",
       excludeSalesOrderId: existing.status === "processing" ? Number(id) : undefined
     });
@@ -310,6 +315,7 @@ export class SalesOrdersService {
           quantity: Number(item.quantity)
         })),
         {
+          branchId: existing.branchId ?? null,
           enforceAvailableStock: true
         }
       );
@@ -326,12 +332,15 @@ export class SalesOrdersService {
 
   async _resolveSalesOrderItems(tenantId, items, options = {}) {
     const variantIds = items.map((item) => item.productVariantId);
-    const variants = await this.repository.findProductVariantsByIds(tenantId, variantIds);
+    const variants = await this.repository.findProductVariantsByIds(tenantId, variantIds, {
+      branchId: options.branchId ?? null
+    });
     const variantMap = new Map(variants.map((v) => [v.id, v]));
     const reservedByVariantId = options.enforceAvailableStock
       ? new Map(
           (
             await this.repository.sumReservedQuantitiesByVariantIds(tenantId, variantIds, {
+              branchId: options.branchId ?? null,
               excludeSalesOrderId: options.excludeSalesOrderId
             })
           ).map((entry) => [Number(entry.productVariantId), Number(entry._sum.quantity ?? 0)])
@@ -391,18 +400,46 @@ export class SalesOrdersService {
       }));
     }
 
-    const reservedQuantities = await this.repository.sumReservedQuantitiesByVariantIds(tenantId, variantIds);
-    const reservedByVariantId = new Map(
-      reservedQuantities.map((entry) => [Number(entry.productVariantId), Number(entry._sum.quantity ?? 0)])
-    );
+    const reservedByBranchVariantKey = new Map();
+    const variantIdsByBranchKey = orders.reduce((acc, order) => {
+      const branchKey = order.branchId ? Number(order.branchId) : 0;
+      if (!acc.has(branchKey)) {
+        acc.set(branchKey, new Set());
+      }
+
+      for (const item of order.items ?? []) {
+        acc.get(branchKey).add(Number(item.productVariantId));
+      }
+
+      return acc;
+    }, new Map());
+
+    for (const [branchKey, variantIdSet] of variantIdsByBranchKey.entries()) {
+      const scopedVariantIds = [...variantIdSet];
+      if (!scopedVariantIds.length) {
+        continue;
+      }
+
+      const reservedQuantities = await this.repository.sumReservedQuantitiesByVariantIds(tenantId, scopedVariantIds, {
+        branchId: branchKey || null
+      });
+
+      for (const entry of reservedQuantities) {
+        reservedByBranchVariantKey.set(
+          `${branchKey}:${Number(entry.productVariantId)}`,
+          Number(entry._sum.quantity ?? 0)
+        );
+      }
+    }
 
     return orders.map((order) => {
       const stockAlertActive = STOCK_ALERT_ACTIVE_STATUSES.has(order.status);
       const ownReservedByVariantId = order.status === "processing" ? buildVariantQuantityMap(order.items) : new Map();
+      const branchKey = order.branchId ? Number(order.branchId) : 0;
       const items = (order.items ?? []).map((item) => {
         const variantId = Number(item.productVariantId);
         const onHand = Number(item.onHandStock ?? item.availableStock ?? item.productVariant?.stockQuantity ?? 0);
-        const totalReserved = Number(reservedByVariantId.get(variantId) ?? 0);
+        const totalReserved = Number(reservedByBranchVariantKey.get(`${branchKey}:${variantId}`) ?? 0);
         const ownReserved = Number(ownReservedByVariantId.get(variantId) ?? 0);
         const reserved = Math.max(0, totalReserved - ownReserved);
         const available = onHand - reserved;

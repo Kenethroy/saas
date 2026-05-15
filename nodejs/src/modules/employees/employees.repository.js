@@ -1,16 +1,21 @@
 import { query } from "#shared/database/mysql";
 
 export class EmployeesRepository {
-  async findPaginated({ page, perPage, search, position, status, excludeUsers }) {
+  async findPaginated(tenantId, { page, perPage, search, position, status, excludeUsers, branchId = null }) {
     const offset = (page - 1) * perPage;
     let sql = `
       SELECT e.*, u.id as user_id, u.username, u.email as user_email, u.role, u.status as user_status
       FROM employees e
-      LEFT JOIN users u ON e.id = u.employee_id
-      WHERE e.delete_flg = 0
+      LEFT JOIN users u ON e.id = u.employee_id AND u.tenant_id = e.tenant_id
+      WHERE e.tenant_id = ? AND e.delete_flg = 0
         AND (u.id IS NULL OR u.role <> 'admin')
     `;
-    const params = [];
+    const params = [tenantId];
+
+    if (branchId) {
+      sql += " AND e.branch_id = ?";
+      params.push(branchId);
+    }
 
     if (search) {
       sql += ` AND (
@@ -53,30 +58,32 @@ export class EmployeesRepository {
     return { rows: formattedRows, total: countRows[0].total };
   }
 
-  async findById(id) {
+  async findById(tenantId, id) {
     const sql = `
       SELECT e.*, u.id as user_id, u.username, u.email as user_email, u.role, u.status as user_status
       FROM employees e
-      LEFT JOIN users u ON e.id = u.employee_id
-      WHERE e.id = ? AND e.delete_flg = 0
+      LEFT JOIN users u ON e.id = u.employee_id AND u.tenant_id = e.tenant_id
+      WHERE e.tenant_id = ? AND e.id = ? AND e.delete_flg = 0
       LIMIT 1
     `;
-    const rows = await query(sql, [id]);
+    const rows = await query(sql, [tenantId, id]);
     return rows[0] ? this._mapEmployeeWithUser(rows[0]) : null;
   }
 
   async create(data) {
     const sql = `
       INSERT INTO employees (
+        tenant_id, branch_id,
         first_name, last_name, position, phone, email, 
         status, address, license_number, license_expiry, 
         emergency_contact_name, emergency_contact_phone, 
         date_hired, salary_rate, rate_type, 
         sss_no, tin_no, philhealth_no, pagibig_no,
         created_ip, updated_ip
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
     const result = await query(sql, [
+      data.tenantId, data.branchId ?? null,
       data.firstName, data.lastName, data.position, data.phone || null, data.email || null,
       data.status || 'active', data.address || null, data.licenseNumber || null, data.licenseExpiry || null,
       data.emergencyContactName || null, data.emergencyContactPhone || null,
@@ -84,10 +91,10 @@ export class EmployeesRepository {
       data.sssNo || null, data.tinNo || null, data.philhealthNo || null, data.pagibigNo || null,
       data.createdIp || null, data.updatedIp || null
     ]);
-    return { id: result.insertId, ...data };
+    return this.findById(data.tenantId, result.insertId);
   }
 
-  async update(id, data) {
+  async update(tenantId, id, data) {
     const fields = [];
     const params = [];
 
@@ -106,6 +113,7 @@ export class EmployeesRepository {
       dateHired: 'date_hired',
       salaryRate: 'salary_rate',
       rateType: 'rate_type',
+      branchId: 'branch_id',
       sssNo: 'sss_no',
       tinNo: 'tin_no',
       philhealthNo: 'philhealth_no',
@@ -121,13 +129,13 @@ export class EmployeesRepository {
       }
     }
 
-    if (fields.length === 0) return this.findById(id);
+    if (fields.length === 0) return this.findById(tenantId, id);
 
-    const sql = `UPDATE employees SET ${fields.join(', ')} WHERE id = ?`;
-    params.push(id);
+    const sql = `UPDATE employees SET ${fields.join(', ')} WHERE tenant_id = ? AND id = ?`;
+    params.push(tenantId, id);
     await query(sql, params);
 
-    return this.findById(id);
+    return this.findById(tenantId, id);
   }
 
   _mapEmployeeWithUser(row) {

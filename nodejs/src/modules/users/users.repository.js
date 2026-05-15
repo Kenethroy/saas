@@ -1,16 +1,16 @@
 import { query } from "#shared/database/mysql";
 
 export class UsersRepository {
-  async findPaginated({ page, perPage, search, role, status }) {
+  async findPaginated(tenantId, { page, perPage, search, role, status }) {
     const offset = (page - 1) * perPage;
     let sql = `
       SELECT u.*, e.id as emp_id, e.first_name, e.last_name, e.position, e.email as emp_email
       FROM users u
-      LEFT JOIN employees e ON u.employee_id = e.id
-      WHERE u.delete_flg = 0
+      LEFT JOIN employees e ON u.employee_id = e.id AND e.tenant_id = u.tenant_id
+      WHERE u.tenant_id = ? AND u.delete_flg = 0
         AND u.role <> 'admin'
     `;
-    const params = [];
+    const params = [tenantId];
 
     if (search) {
       sql += ` AND (
@@ -49,50 +49,50 @@ export class UsersRepository {
     return { rows: formattedRows, total: countRows[0].total };
   }
 
-  async findById(id) {
+  async findById(tenantId, id) {
     const sql = `
       SELECT u.*, e.id as emp_id, e.first_name, e.last_name, e.position, e.email as emp_email
       FROM users u
-      LEFT JOIN employees e ON u.employee_id = e.id
-      WHERE u.id = ? AND u.delete_flg = 0
+      LEFT JOIN employees e ON u.employee_id = e.id AND e.tenant_id = u.tenant_id
+      WHERE u.tenant_id = ? AND u.id = ? AND u.delete_flg = 0
       LIMIT 1
     `;
-    const rows = await query(sql, [id]);
+    const rows = await query(sql, [tenantId, id]);
     return rows[0] ? this._mapUserWithEmployee(rows[0]) : null;
   }
 
-  async findByUsername(username) {
-    const sql = "SELECT * FROM users WHERE username = ? LIMIT 1";
-    const rows = await query(sql, [username]);
+  async findByUsername(tenantId, username) {
+    const sql = "SELECT * FROM users WHERE tenant_id = ? AND username = ? LIMIT 1";
+    const rows = await query(sql, [tenantId, username]);
     return rows[0] || null;
   }
 
-  async findByEmail(email) {
-    const sql = "SELECT * FROM users WHERE email = ? LIMIT 1";
-    const rows = await query(sql, [email]);
+  async findByEmail(tenantId, email) {
+    const sql = "SELECT * FROM users WHERE tenant_id = ? AND email = ? LIMIT 1";
+    const rows = await query(sql, [tenantId, email]);
     return rows[0] || null;
   }
 
-  async findByEmployeeId(employeeId) {
-    const sql = "SELECT * FROM users WHERE employee_id = ? AND delete_flg = 0 LIMIT 1";
-    const rows = await query(sql, [employeeId]);
+  async findByEmployeeId(tenantId, employeeId) {
+    const sql = "SELECT * FROM users WHERE tenant_id = ? AND employee_id = ? AND delete_flg = 0 LIMIT 1";
+    const rows = await query(sql, [tenantId, employeeId]);
     return rows[0] || null;
   }
 
-  async findEmployeeById(employeeId) {
-    const sql = "SELECT * FROM employees WHERE id = ? AND delete_flg = 0 LIMIT 1";
-    const rows = await query(sql, [employeeId]);
+  async findEmployeeById(tenantId, employeeId) {
+    const sql = "SELECT * FROM employees WHERE tenant_id = ? AND id = ? AND delete_flg = 0 LIMIT 1";
+    const rows = await query(sql, [tenantId, employeeId]);
     return rows[0] || null;
   }
 
-  async findAvailableEmployees(search) {
+  async findAvailableEmployees(tenantId, search) {
     let sql = `
       SELECT e.id, e.first_name, e.last_name, e.position, e.email, e.status
       FROM employees e
-      LEFT JOIN users u ON e.id = u.employee_id
-      WHERE e.delete_flg = 0 AND u.id IS NULL
+      LEFT JOIN users u ON e.id = u.employee_id AND u.tenant_id = e.tenant_id
+      WHERE e.tenant_id = ? AND e.delete_flg = 0 AND u.id IS NULL
     `;
-    const params = [];
+    const params = [tenantId];
 
     if (search) {
       sql += ` AND (
@@ -120,18 +120,19 @@ export class UsersRepository {
 
   async create(data) {
     const sql = `
-      INSERT INTO users (employee_id, username, email, password_hash, role, status, created_ip, updated_ip)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO users (tenant_id, employee_id, username, email, password_hash, role, status, created_ip, updated_ip)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
     const result = await query(sql, [
+      data.tenantId,
       data.employeeId, data.username, data.email, data.passwordHash,
       data.role || 'staff', data.status !== undefined ? data.status : 1,
       data.createdIp || null, data.updatedIp || null
     ]);
-    return this.findById(result.insertId);
+    return this.findById(data.tenantId, result.insertId);
   }
 
-  async update(id, data) {
+  async update(tenantId, id, data) {
     const fields = [];
     const params = [];
 
@@ -152,13 +153,13 @@ export class UsersRepository {
       }
     }
 
-    if (fields.length === 0) return this.findById(id);
+    if (fields.length === 0) return this.findById(tenantId, id);
 
-    const sql = `UPDATE users SET ${fields.join(', ')} WHERE id = ?`;
-    params.push(id);
+    const sql = `UPDATE users SET ${fields.join(', ')} WHERE tenant_id = ? AND id = ?`;
+    params.push(tenantId, id);
     await query(sql, params);
 
-    return this.findById(id);
+    return this.findById(tenantId, id);
   }
 
   _mapUserWithEmployee(row) {

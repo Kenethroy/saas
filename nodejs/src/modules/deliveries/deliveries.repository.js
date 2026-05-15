@@ -4,7 +4,7 @@ import { AppError } from "#shared/utils/app-error";
 import { allocateDocumentNumber } from "#shared/utils/document-sequences";
 
 export class DeliveriesRepository {
-  async findPaginated(tenantId, { page, perPage, search, status, salesOrderId, dateFrom, dateTo }) {
+  async findPaginated(tenantId, { page, perPage, search, status, salesOrderId, dateFrom, dateTo, branchId = null }) {
     const offset = (page - 1) * perPage;
 
     let sql = `
@@ -39,6 +39,11 @@ export class DeliveriesRepository {
     if (salesOrderId) {
       sql += " AND EXISTS (SELECT 1 FROM delivery_sales_orders dl WHERE dl.tenant_id = d.tenant_id AND dl.delivery_id = d.id AND dl.sales_order_id = ?)";
       params.push(salesOrderId);
+    }
+
+    if (branchId) {
+      sql += " AND d.branch_id = ?";
+      params.push(Number(branchId));
     }
 
     const countSql = `SELECT COUNT(*) as total ${sql}`;
@@ -212,8 +217,8 @@ export class DeliveriesRepository {
     return rows[0] || null;
   }
 
-  async findSalesOrdersForSelection(tenantId) {
-    const sql = `
+  async findSalesOrdersForSelection(tenantId, { branchId = null } = {}) {
+    let sql = `
       SELECT so.*, c.name as customer_name
       FROM sales_orders so
       JOIN customers c ON so.customer_id = c.id AND c.tenant_id = so.tenant_id
@@ -223,9 +228,14 @@ export class DeliveriesRepository {
           JOIN deliveries d ON dl.delivery_id = d.id AND d.tenant_id = dl.tenant_id
           WHERE dl.tenant_id = so.tenant_id AND dl.sales_order_id = so.id AND d.delete_flg = 0 AND d.status <> 'cancelled'
         )
-      ORDER BY so.order_date DESC, so.id DESC
     `;
-    const rows = await query(sql, [tenantId]);
+    const params = [tenantId];
+    if (branchId) {
+      sql += " AND so.branch_id = ?";
+      params.push(Number(branchId));
+    }
+    sql += " ORDER BY so.order_date DESC, so.id DESC";
+    const rows = await query(sql, params);
     return rows.map(row => ({
       ...row,
       id: row.id,

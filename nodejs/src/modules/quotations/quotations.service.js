@@ -130,7 +130,7 @@ export class QuotationsService {
     return normalizeQuotation(quotation);
   }
 
-  async list(tenantId, filters) {
+  async list(tenantId, filters, context = {}) {
     const scopedTenantId = requireTenantId(tenantId);
     const { rows, total } = await this.repository.findPaginated(scopedTenantId, {
       page: filters.page,
@@ -138,7 +138,8 @@ export class QuotationsService {
       search: filters.search,
       status: filters.status,
       customerId: filters.customerId,
-      agentId: filters.agentId
+      agentId: filters.agentId,
+      branchId: context.branchId ?? null
     });
 
     return {
@@ -155,7 +156,9 @@ export class QuotationsService {
   async create(tenantId, payload, context = {}) {
     const scopedTenantId = requireTenantId(tenantId);
     const branchId = context.branchId ? Number(context.branchId) : null;
-    const { normalizedItems, itemsSubtotal, discountAmount, totalAmount } = await this.prepareQuotationPayload(scopedTenantId, payload);
+    const { normalizedItems, itemsSubtotal, discountAmount, totalAmount } = await this.prepareQuotationPayload(scopedTenantId, payload, {
+      branchId
+    });
     const ipAddress = context?.ipAddress ?? null;
 
     const quotation = await this.repository.createQuotation({
@@ -204,7 +207,9 @@ export class QuotationsService {
 
     assertEditableStatus(existing.status);
 
-    const { normalizedItems, itemsSubtotal, discountAmount, totalAmount } = await this.prepareQuotationPayload(scopedTenantId, payload);
+    const { normalizedItems, itemsSubtotal, discountAmount, totalAmount } = await this.prepareQuotationPayload(scopedTenantId, payload, {
+      branchId: context.branchId ? Number(context.branchId) : (existing.branchId ? Number(existing.branchId) : null)
+    });
     const ipAddress = context?.ipAddress ?? null;
 
     await this.repository.updateQuotation(scopedTenantId, Number(id), {
@@ -335,7 +340,7 @@ export class QuotationsService {
     };
   }
 
-  async prepareQuotationPayload(tenantId, payload) {
+  async prepareQuotationPayload(tenantId, payload, context = {}) {
     const customer = await this.repository.findCustomerById(tenantId, payload.customerId);
     if (!customer) {
       throw new AppError("Customer not found", 404);
@@ -356,7 +361,9 @@ export class QuotationsService {
     }
 
     const variantIds = payload.items.map((item) => item.productVariantId);
-    const variants = await this.repository.findProductVariantsByIds(tenantId, variantIds);
+    const variants = await this.repository.findProductVariantsByIds(tenantId, variantIds, {
+      branchId: context.branchId ?? null
+    });
     const variantMap = new Map(variants.map((variant) => [Number(variant.id), variant]));
 
     const normalizedItems = payload.items.map((item) => {

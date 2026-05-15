@@ -61,8 +61,10 @@ export class CategoriesService {
     return normalizeCategory(category);
   }
 
-  async listForSelection(tenantId) {
-    const categories = await this.repository.findListWithVariantCounts(requireTenantId(tenantId));
+  async listForSelection(tenantId, context = {}) {
+    const categories = await this.repository.findListWithVariantCounts(requireTenantId(tenantId), {
+      branchId: context.branchId ?? null
+    });
     return categories
       .filter((category) => category.variantCount > 0)
       .map(normalizeCategory);

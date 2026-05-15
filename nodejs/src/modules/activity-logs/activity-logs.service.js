@@ -5,8 +5,13 @@ export class ActivityLogsService {
     this.repository = new ActivityLogsRepository();
   }
 
-  async getLogs(filters) {
-    const { data, total } = await this.repository.findAll(filters);
+  async getLogs(tenantId, filters, context = {}) {
+    const { data, total } = await this.repository.findAll({
+      ...filters,
+      tenantId,
+      branchId: context.branchId ?? filters.branchId ?? null
+    });
+
     
     // Format data for frontend (Vue-like structure)
     const formattedData = data.map(log => {

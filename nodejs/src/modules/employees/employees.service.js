@@ -1,6 +1,14 @@
 import { AppError } from "#shared/utils/app-error";
 import { EmployeesRepository } from "#modules/employees/employees.repository";
 
+function requireTenantId(tenantId) {
+  const normalized = Number(tenantId);
+  if (!normalized) {
+    throw new AppError("Tenant context is required", 401);
+  }
+  return normalized;
+}
+
 function normalizeEmployee(record) {
   return {
     id: Number(record.id),
@@ -68,14 +76,16 @@ export class EmployeesService {
     this.repository = repository;
   }
 
-  async list(filters) {
-    const { rows, total } = await this.repository.findPaginated({
+  async list(tenantId, filters, context = {}) {
+    const scopedTenantId = requireTenantId(tenantId);
+    const { rows, total } = await this.repository.findPaginated(scopedTenantId, {
       page: filters.page,
       perPage: filters.perPage,
       search: filters.search,
       position: filters.position,
       status: filters.status,
-      excludeUsers: filters.excludeUsers
+      excludeUsers: filters.excludeUsers,
+      branchId: context.branchId ?? null
     });
 
     return {
@@ -89,8 +99,8 @@ export class EmployeesService {
     };
   }
 
-  async getById(id) {
-    const employee = await this.repository.findById(id);
+  async getById(tenantId, id) {
+    const employee = await this.repository.findById(requireTenantId(tenantId), id);
 
     if (!employee) {
       throw new AppError("Employee not found", 404);
@@ -99,15 +109,18 @@ export class EmployeesService {
     return normalizeEmployee(employee);
   }
 
-  async create(payload, context = {}) {
+  async create(tenantId, payload, context = {}) {
+    const scopedTenantId = requireTenantId(tenantId);
     try {
-      const employee = await this.repository.create(
-        mapEmployeeInput(payload, {
+      const employee = await this.repository.create({
+        tenantId: scopedTenantId,
+        branchId: context.branchId ?? null,
+        ...mapEmployeeInput(payload, {
           includeCreatedIp: true,
           includeUpdatedIp: true,
           ipAddress: context.ipAddress ?? null
         })
-      );
+      });
       return {
         id: Number(employee.id)
       };
@@ -116,8 +129,9 @@ export class EmployeesService {
     }
   }
 
-  async update(id, payload, context = {}) {
-    const existing = await this.repository.findById(id);
+  async update(tenantId, id, payload, context = {}) {
+    const scopedTenantId = requireTenantId(tenantId);
+    const existing = await this.repository.findById(scopedTenantId, id);
 
     if (!existing) {
       throw new AppError("Employee not found", 404);
@@ -129,20 +143,22 @@ export class EmployeesService {
 
     try {
       await this.repository.update(
+        scopedTenantId,
         id,
         mapEmployeeInput(payload, {
           includeUpdatedIp: true,
           ipAddress: context.ipAddress ?? null
         })
       );
-      return this.getById(id);
+      return this.getById(scopedTenantId, id);
     } catch (error) {
       this.handleDatabaseError(error);
     }
   }
 
-  async delete(id, context = {}) {
-    const existing = await this.repository.findById(id);
+  async delete(tenantId, id, context = {}) {
+    const scopedTenantId = requireTenantId(tenantId);
+    const existing = await this.repository.findById(scopedTenantId, id);
 
     if (!existing) {
       throw new AppError("Employee not found", 404);
@@ -152,7 +168,7 @@ export class EmployeesService {
       throw new AppError("Employees linked to admin accounts are protected and cannot be deleted", 403);
     }
 
-    await this.repository.update(id, {
+    await this.repository.update(scopedTenantId, id, {
       deleteFlag: true,
       updatedIp: context.ipAddress ?? null
     });

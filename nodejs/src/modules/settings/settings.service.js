@@ -5,6 +5,14 @@ import { AppError } from "#shared/utils/app-error";
 import { toPublicFileUrl, toStoredUploadPath } from "#shared/utils/uploads";
 import { ActivityLogsService } from "#modules/activity-logs/activity-logs.service";
 
+function requireTenantId(tenantId) {
+  const normalized = Number(tenantId);
+  if (!normalized) {
+    throw new AppError("Tenant context is required", 401);
+  }
+  return normalized;
+}
+
 export class SettingsService {
   constructor(
     repository = new SettingsRepository(),
@@ -16,8 +24,9 @@ export class SettingsService {
     this.activityLogs = activityLogs;
   }
 
-  async getSettings() {
-    const settings = await this.repository.findAll();
+  async getSettings(tenantId) {
+    const scopedTenantId = requireTenantId(tenantId);
+    const settings = await this.repository.findAll(scopedTenantId);
     
     const result = {
       general: {},
@@ -40,7 +49,8 @@ export class SettingsService {
     return result;
   }
 
-  async saveSettings(payload, context = {}) {
+  async saveSettings(tenantId, payload, context = {}) {
+    const scopedTenantId = requireTenantId(tenantId);
     if (!Array.isArray(payload)) {
       throw new AppError('Payload must be an array of settings', 400);
     }
@@ -52,9 +62,10 @@ export class SettingsService {
       return item;
     });
 
-    await this.repository.upsertMany(normalizedPayload);
+    await this.repository.upsertMany(scopedTenantId, normalizedPayload);
 
     await this.activityLogs.log({
+      tenantId: scopedTenantId,
       userId: context.userId || null,
       action: 'UPDATE',
       module: 'SETTINGS',
@@ -66,8 +77,8 @@ export class SettingsService {
     return true;
   }
 
-  async getPublicSettings() {
-    const settings = await this.repository.findByCategory('general');
+  async getPublicSettings(tenantId) {
+    const settings = await this.repository.findByCategory(requireTenantId(tenantId), 'general');
     const result = {};
     settings.forEach(s => {
       if (['company_name', 'company_short_name', 'system_logo'].includes(s.key)) {
@@ -77,12 +88,14 @@ export class SettingsService {
     return result;
   }
 
-  async updateLogoSetting(url, context = {}) {
-    await this.repository.upsertMany([
+  async updateLogoSetting(tenantId, url, context = {}) {
+    const scopedTenantId = requireTenantId(tenantId);
+    await this.repository.upsertMany(scopedTenantId, [
       { key: 'system_logo', value: toStoredUploadPath(url), category: 'general' }
     ]);
 
     await this.activityLogs.log({
+      tenantId: scopedTenantId,
       userId: context.userId || null,
       action: 'UPDATE',
       module: 'SETTINGS',
@@ -93,8 +106,9 @@ export class SettingsService {
     return true;
   }
 
-  async changePassword(userId, currentPassword, newPassword, context = {}) {
-    const user = await this.usersRepository.findById(userId);
+  async changePassword(tenantId, userId, currentPassword, newPassword, context = {}) {
+    const scopedTenantId = requireTenantId(tenantId);
+    const user = await this.usersRepository.findById(scopedTenantId, userId);
     if (!user) {
       throw new AppError('User not found', 404);
     }
@@ -105,9 +119,10 @@ export class SettingsService {
     }
 
     const passwordHash = await bcrypt.hash(newPassword, 10);
-    await this.usersRepository.update(userId, { passwordHash });
+    await this.usersRepository.update(scopedTenantId, userId, { passwordHash });
 
     await this.activityLogs.log({
+      tenantId: scopedTenantId,
       userId,
       action: 'UPDATE',
       module: 'SECURITY',

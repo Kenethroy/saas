@@ -9,7 +9,7 @@ export class UsersController {
 
   list = async (req, res, next) => {
     try {
-      const result = await this.service.list(req.query);
+      const result = await this.service.list(req.auth?.user?.tenantId, req.query);
       res.status(200).json(
         successResponse({
           message: "Users retrieved successfully",
@@ -24,7 +24,7 @@ export class UsersController {
 
   employeeOptions = async (req, res, next) => {
     try {
-      const employees = await this.service.listAvailableEmployees(req.query.search);
+      const employees = await this.service.listAvailableEmployees(req.auth?.user?.tenantId, req.query.search);
       res.status(200).json(
         successResponse({
           message: "Available employees retrieved successfully",
@@ -38,7 +38,7 @@ export class UsersController {
 
   show = async (req, res, next) => {
     try {
-      const user = await this.service.getById(req.params.id);
+      const user = await this.service.getById(req.auth?.user?.tenantId, req.params.id);
       res.status(200).json(
         successResponse({
           message: "User retrieved successfully",
@@ -52,7 +52,7 @@ export class UsersController {
 
   create = async (req, res, next) => {
     try {
-      const user = await this.service.create(req.body, {
+      const user = await this.service.create(req.auth?.user?.tenantId, req.body, {
         ipAddress: getPersistedRequestIp(req)
       });
       res.status(201).json(
@@ -68,7 +68,7 @@ export class UsersController {
 
   update = async (req, res, next) => {
     try {
-      const user = await this.service.update(req.params.id, req.body, {
+      const user = await this.service.update(req.auth?.user?.tenantId, req.params.id, req.body, {
         ipAddress: getPersistedRequestIp(req)
       });
       res.status(200).json(
@@ -84,7 +84,7 @@ export class UsersController {
 
   delete = async (req, res, next) => {
     try {
-      await this.service.delete(req.params.id, {
+      await this.service.delete(req.auth?.user?.tenantId, req.params.id, {
         ipAddress: getPersistedRequestIp(req)
       });
       res.status(200).json(

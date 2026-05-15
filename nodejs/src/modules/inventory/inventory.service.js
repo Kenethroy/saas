@@ -37,7 +37,10 @@ export class InventoryService {
       if (error.message === "Product variant not found") {
         throw new AppError(error.message, 404);
       }
-      if (error.message === "Stock adjustment would result in negative stock.") {
+      if (
+        error.message === "Stock adjustment would result in negative stock."
+        || error.message === "Branch inventory adjustment would result in negative stock."
+      ) {
         throw new AppError(error.message, 422);
       }
       throw error;

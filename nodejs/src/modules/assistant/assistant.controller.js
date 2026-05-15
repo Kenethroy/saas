@@ -10,6 +10,7 @@ export class AssistantController {
   query = async (req, res, next) => {
     try {
       const data = await this.service.query({
+        tenantId: req.auth?.user?.tenantId,
         question: req.body.question,
         context: req.body.context ?? {},
         user: req.auth?.user,
@@ -30,7 +31,7 @@ export class AssistantController {
 
   status = async (_req, res, next) => {
     try {
-      const data = await this.service.getStatus();
+      const data = await this.service.getStatus(_req.auth?.user?.tenantId);
 
       res.status(200).json(
         successResponse({
@@ -46,6 +47,7 @@ export class AssistantController {
   reindex = async (req, res, next) => {
     try {
       const data = await this.service.reindex({
+        tenantId: req.auth?.user?.tenantId,
         scope: req.body.scope,
         limit: req.body.limit,
         user: req.auth?.user,

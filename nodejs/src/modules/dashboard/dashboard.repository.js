@@ -34,13 +34,15 @@ function mapSalesOrders(rows) {
 }
 
 export class DashboardRepository {
-  async findNotificationSettings() {
+  async findNotificationSettings(tenantId) {
     const rows = await query(`
       SELECT \`key\`, value
       FROM settings
-      WHERE \`key\` IN ('stock_alerts_enabled', 'payment_alerts_enabled')
+      WHERE tenant_id = ?
+        AND delete_flg = 0
+        AND \`key\` IN ('stock_alerts_enabled', 'payment_alerts_enabled')
       ORDER BY \`key\` ASC
-    `);
+    `, [tenantId]);
 
     return rows.map((row) => ({
       key: row.key,
@@ -48,8 +50,9 @@ export class DashboardRepository {
     }));
   }
 
-  async findSalesOrdersInRange(start, end) {
-    const rows = await query(`
+  async findSalesOrdersInRange(tenantId, start, end, { branchId = null } = {}) {
+    const params = [tenantId, start, end];
+    let sql = `
       SELECT
         so.id,
         DATE_FORMAT(so.order_date, '%Y-%m-%d') AS order_date,
@@ -61,27 +64,44 @@ export class DashboardRepository {
         p.id AS product_id,
         p.name AS product_name
       FROM sales_orders so
-      JOIN customers c ON c.id = so.customer_id
-      LEFT JOIN sales_order_items soi ON soi.sales_order_id = so.id
-      LEFT JOIN products p ON p.id = soi.product_id
-      WHERE so.delete_flg = 0
+      JOIN customers c ON c.id = so.customer_id AND c.tenant_id = so.tenant_id
+      LEFT JOIN sales_order_items soi ON soi.sales_order_id = so.id AND soi.tenant_id = so.tenant_id
+      LEFT JOIN products p ON p.id = soi.product_id AND p.tenant_id = so.tenant_id
+      WHERE so.tenant_id = ?
+        AND so.delete_flg = 0
         AND so.status <> 'cancelled'
         AND so.order_date BETWEEN ? AND ?
-      ORDER BY so.order_date ASC, so.id ASC, soi.id ASC
-    `, [start, end]);
+    `;
+
+    if (branchId) {
+      sql += " AND so.branch_id = ?";
+      params.push(Number(branchId));
+    }
+
+    sql += " ORDER BY so.order_date ASC, so.id ASC, soi.id ASC";
+    const rows = await query(sql, params);
 
     return mapSalesOrders(rows);
   }
 
-  async findPurchaseOrdersInRange(start, end) {
-    const rows = await query(`
+  async findPurchaseOrdersInRange(tenantId, start, end, { branchId = null } = {}) {
+    const params = [tenantId, start, end];
+    let sql = `
       SELECT id, total_amount
       FROM purchase_orders
-      WHERE delete_flg = 0
+      WHERE tenant_id = ?
+        AND delete_flg = 0
         AND status <> 'cancelled'
         AND order_date BETWEEN ? AND ?
-      ORDER BY order_date ASC, id ASC
-    `, [start, end]);
+    `;
+
+    if (branchId) {
+      sql += " AND branch_id = ?";
+      params.push(Number(branchId));
+    }
+
+    sql += " ORDER BY order_date ASC, id ASC";
+    const rows = await query(sql, params);
 
     return rows.map((row) => ({
       id: Number(row.id),
@@ -89,15 +109,24 @@ export class DashboardRepository {
     }));
   }
 
-  async findExpensesInRange(start, end) {
-    const rows = await query(`
+  async findExpensesInRange(tenantId, start, end, { branchId = null } = {}) {
+    const params = [tenantId, start, end];
+    let sql = `
       SELECT id, amount
       FROM business_expenses
-      WHERE delete_flg = 0
+      WHERE tenant_id = ?
+        AND delete_flg = 0
         AND status <> 'void'
         AND expense_date BETWEEN ? AND ?
-      ORDER BY expense_date ASC, id ASC
-    `, [start, end]);
+    `;
+
+    if (branchId) {
+      sql += " AND branch_id = ?";
+      params.push(Number(branchId));
+    }
+
+    sql += " ORDER BY expense_date ASC, id ASC";
+    const rows = await query(sql, params);
 
     return rows.map((row) => ({
       id: Number(row.id),
@@ -105,8 +134,9 @@ export class DashboardRepository {
     }));
   }
 
-  async findPaymentAllocationsInRange(start, end) {
-    const rows = await query(`
+  async findPaymentAllocationsInRange(tenantId, start, end, { branchId = null } = {}) {
+    const params = [tenantId, start, end];
+    let sql = `
       SELECT
         pa.id,
         pa.amount_allocated,
@@ -118,13 +148,21 @@ export class DashboardRepository {
         e.first_name AS agent_first_name,
         e.last_name AS agent_last_name
       FROM payment_allocations pa
-      JOIN payments p ON p.id = pa.payment_id
-      JOIN accounts_receivable ar ON ar.id = pa.accounts_receivable_id
-      LEFT JOIN customers c ON c.id = ar.customer_id
-      LEFT JOIN employees e ON e.id = ar.agent_id
-      WHERE p.payment_date BETWEEN ? AND ?
-      ORDER BY p.payment_date ASC, pa.id ASC
-    `, [start, end]);
+      JOIN payments p ON p.id = pa.payment_id AND p.tenant_id = pa.tenant_id
+      JOIN accounts_receivable ar ON ar.id = pa.accounts_receivable_id AND ar.tenant_id = pa.tenant_id
+      LEFT JOIN customers c ON c.id = ar.customer_id AND c.tenant_id = pa.tenant_id
+      LEFT JOIN employees e ON e.id = ar.agent_id AND e.tenant_id = pa.tenant_id
+      WHERE pa.tenant_id = ?
+        AND p.payment_date BETWEEN ? AND ?
+    `;
+
+    if (branchId) {
+      sql += " AND p.branch_id = ?";
+      params.push(Number(branchId));
+    }
+
+    sql += " ORDER BY p.payment_date ASC, pa.id ASC";
+    const rows = await query(sql, params);
 
     return rows.map((row) => ({
       id: Number(row.id),
@@ -149,8 +187,9 @@ export class DashboardRepository {
     }));
   }
 
-  async findOpenReceivables() {
-    const rows = await query(`
+  async findOpenReceivables(tenantId, { branchId = null } = {}) {
+    const params = [tenantId];
+    let sql = `
       SELECT
         ar.id,
         ar.customer_id,
@@ -170,15 +209,23 @@ export class DashboardRepository {
         so.id AS sales_order_id,
         so.sales_order_number
       FROM accounts_receivable ar
-      JOIN customers c ON c.id = ar.customer_id
-      LEFT JOIN employees e ON e.id = ar.agent_id
-      LEFT JOIN invoices i ON i.id = ar.invoice_id
-      LEFT JOIN sales_orders so ON so.id = i.sales_order_id
-      WHERE ar.delete_flg = 0
+      JOIN customers c ON c.id = ar.customer_id AND c.tenant_id = ar.tenant_id
+      LEFT JOIN employees e ON e.id = ar.agent_id AND e.tenant_id = ar.tenant_id
+      LEFT JOIN invoices i ON i.id = ar.invoice_id AND i.tenant_id = ar.tenant_id
+      LEFT JOIN sales_orders so ON so.id = i.sales_order_id AND so.tenant_id = ar.tenant_id
+      WHERE ar.tenant_id = ?
+        AND ar.delete_flg = 0
         AND ar.status IN ('unpaid', 'partial')
         AND ar.outstanding_amount > 0
-      ORDER BY ar.due_date ASC, ar.invoice_date ASC, ar.id ASC
-    `);
+    `;
+
+    if (branchId) {
+      sql += " AND i.branch_id = ?";
+      params.push(Number(branchId));
+    }
+
+    sql += " ORDER BY ar.due_date ASC, ar.invoice_date ASC, ar.id ASC";
+    const rows = await query(sql, params);
 
     return rows.map((row) => ({
       id: Number(row.id),
@@ -218,26 +265,43 @@ export class DashboardRepository {
     }));
   }
 
-  async findInventoryVariants() {
+  async findInventoryVariants(tenantId, { branchId = null } = {}) {
+    const params = [tenantId];
+    let stockSelect = "pv.stock_quantity";
+    let stockJoin = "";
+
+    if (branchId) {
+      stockSelect = "COALESCE(bib.on_hand_qty, 0)";
+      stockJoin = `
+        LEFT JOIN branch_inventory_balances bib
+          ON bib.tenant_id = pv.tenant_id
+         AND bib.product_variant_id = pv.id
+         AND bib.branch_id = ?
+      `;
+      params.unshift(Number(branchId));
+    }
+
     const rows = await query(`
       SELECT
         pv.id,
         pv.product_id,
         pv.name,
-        pv.stock_quantity,
+        ${stockSelect} AS stock_quantity,
         pv.reorder_level,
         p.name AS product_name,
         c.id AS category_id,
         c.name AS category_name
       FROM product_variants pv
-      JOIN products p ON p.id = pv.product_id
-      LEFT JOIN categories c ON c.id = p.category_id
-      WHERE pv.delete_flg = 0
+      JOIN products p ON p.id = pv.product_id AND p.tenant_id = pv.tenant_id
+      LEFT JOIN categories c ON c.id = p.category_id AND c.tenant_id = pv.tenant_id
+      ${stockJoin}
+      WHERE pv.tenant_id = ?
+        AND pv.delete_flg = 0
         AND pv.status = 1
         AND p.delete_flg = 0
         AND p.status = 1
       ORDER BY p.name ASC, pv.name ASC
-    `);
+    `, params);
 
     return rows.map((row) => ({
       id: Number(row.id),
@@ -258,8 +322,9 @@ export class DashboardRepository {
     }));
   }
 
-  async findReceivablesInRange(start, end) {
-    const rows = await query(`
+  async findReceivablesInRange(tenantId, start, end, { branchId = null } = {}) {
+    const params = [tenantId, start, end];
+    let sql = `
       SELECT
         ar.id,
         ar.agent_id,
@@ -271,16 +336,24 @@ export class DashboardRepository {
         e.first_name AS agent_first_name,
         e.last_name AS agent_last_name
       FROM accounts_receivable ar
-      JOIN invoices i ON i.id = ar.invoice_id
-      JOIN employees e ON e.id = ar.agent_id
-      WHERE ar.delete_flg = 0
+      JOIN invoices i ON i.id = ar.invoice_id AND i.tenant_id = ar.tenant_id
+      JOIN employees e ON e.id = ar.agent_id AND e.tenant_id = ar.tenant_id
+      WHERE ar.tenant_id = ?
+        AND ar.delete_flg = 0
         AND ar.is_opening_balance = 0
         AND ar.agent_id IS NOT NULL
         AND i.delete_flg = 0
         AND i.status <> 'cancelled'
         AND ar.invoice_date BETWEEN ? AND ?
-      ORDER BY ar.invoice_date ASC, ar.id ASC
-    `, [start, end]);
+    `;
+
+    if (branchId) {
+      sql += " AND i.branch_id = ?";
+      params.push(Number(branchId));
+    }
+
+    sql += " ORDER BY ar.invoice_date ASC, ar.id ASC";
+    const rows = await query(sql, params);
 
     return rows.map((row) => ({
       id: Number(row.id),

@@ -1,5 +1,6 @@
 import { AppError } from "#shared/utils/app-error";
 import { allocateDocumentNumber } from "#shared/utils/document-sequences";
+import { applyBranchInventoryDelta } from "#shared/utils/branch-inventory";
 
 const INVENTORY_TRANSACTION_TYPE_SALE = 2;
 
@@ -53,18 +54,20 @@ export async function deliverSalesOrder(tx, salesOrderId, { tenantId = null, ipA
       const quantity = Number(item.quantity || 0);
       if (quantity <= 0) continue;
 
-      const [updateResult] = await tx.execute(`
-        UPDATE product_variants SET stock_quantity = stock_quantity - ? 
-        WHERE tenant_id = ? AND id = ? AND delete_flg = 0 AND stock_quantity >= ?
-      `, [quantity, tenantId, item.product_variant_id, quantity]);
-
-      if (updateResult.affectedRows === 0) {
-        throw new AppError(`Insufficient stock for ${item.variant_name}`, 422);
+      let movement;
+      try {
+        movement = await applyBranchInventoryDelta(tx, {
+          tenantId,
+          branchId: order.branch_id ? Number(order.branch_id) : null,
+          productVariantId: item.product_variant_id,
+          quantityChange: -quantity
+        });
+      } catch (error) {
+        if (error instanceof AppError && error.message === "Branch inventory adjustment would result in negative stock.") {
+          throw new AppError(`Insufficient stock for ${item.variant_name}`, 422);
+        }
+        throw error;
       }
-
-      const [vRows] = await tx.execute("SELECT stock_quantity FROM product_variants WHERE tenant_id = ? AND id = ?", [tenantId, item.product_variant_id]);
-      const quantityAfter = vRows[0].stock_quantity;
-      const quantityBefore = quantityAfter + quantity;
 
       await tx.execute(`
         INSERT INTO inventory_transactions (
@@ -72,7 +75,7 @@ export async function deliverSalesOrder(tx, salesOrderId, { tenantId = null, ipA
           transaction_type, reference_type, reference_id, reason, created_by, created_ip, updated_ip
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [
-        order.tenant_id, order.branch_id || null, item.product_id, item.product_variant_id, quantityBefore, -quantity, quantityAfter,
+        order.tenant_id, movement.branchId, movement.productId, item.product_variant_id, movement.quantityBefore, -quantity, movement.quantityAfter,
         INVENTORY_TRANSACTION_TYPE_SALE, "sales_order_delivered", salesOrderId, `Sales order delivered (${order.sales_order_number})`,
         userId, ipAddress, ipAddress
       ]);

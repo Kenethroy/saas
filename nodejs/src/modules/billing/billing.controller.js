@@ -20,6 +20,20 @@ export class BillingController {
     }
   };
 
+  confirmCheckout = async (req, res, next) => {
+    try {
+      const result = await this.service.confirmCheckout(req.auth.account.id, req.body);
+      res.status(200).json(
+        successResponse({
+          message: "Checkout confirmation processed successfully",
+          data: result
+        })
+      );
+    } catch (error) {
+      next(error);
+    }
+  };
+
   xenditWebhook = async (req, res, next) => {
     try {
       const result = await this.service.handleXenditWebhook(req.body, req.headers);

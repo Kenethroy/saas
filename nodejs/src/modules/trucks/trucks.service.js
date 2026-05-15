@@ -1,6 +1,14 @@
 import { AppError } from "#shared/utils/app-error";
 import { TrucksRepository } from "#modules/trucks/trucks.repository";
 
+function requireTenantId(tenantId) {
+  const normalized = Number(tenantId);
+  if (!normalized) {
+    throw new AppError("Tenant context is required", 401);
+  }
+  return normalized;
+}
+
 function toNumber(value) {
   return value == null ? null : Number(value);
 }
@@ -34,15 +42,17 @@ export class TrucksService {
     this.repository = repository;
   }
 
-  async list(filters) {
+  async list(tenantId, filters, context = {}) {
+    const scopedTenantId = requireTenantId(tenantId);
     const page = filters.page ?? 1;
     const perPage = filters.perPage ?? 10;
 
-    const result = await this.repository.findPaginated({
+    const result = await this.repository.findPaginated(scopedTenantId, {
       search: filters.search,
       status: filters.status,
       page,
-      perPage
+      perPage,
+      branchId: context.branchId ?? null
     });
 
     return {
@@ -56,8 +66,8 @@ export class TrucksService {
     };
   }
 
-  async getById(id) {
-    const truck = await this.repository.findById(id);
+  async getById(tenantId, id) {
+    const truck = await this.repository.findById(requireTenantId(tenantId), id);
     if (!truck) {
       throw new AppError("Truck not found", 404);
     }
@@ -65,23 +75,27 @@ export class TrucksService {
     return normalizeTruck(truck);
   }
 
-  async listForAssignment(filters) {
-    const trucks = await this.repository.listForAssignment({
-      search: filters.search
+  async listForAssignment(tenantId, filters, context = {}) {
+    const trucks = await this.repository.listForAssignment(requireTenantId(tenantId), {
+      search: filters.search,
+      branchId: context.branchId ?? null
     });
 
     return trucks.map(normalizeTruckListItem);
   }
 
-  async create(payload, context = {}) {
+  async create(tenantId, payload, context = {}) {
+    const scopedTenantId = requireTenantId(tenantId);
     const plateNumber = payload.plateNumber.trim();
-    const duplicate = await this.repository.findByPlateNumber(plateNumber);
+    const duplicate = await this.repository.findByPlateNumber(scopedTenantId, plateNumber);
 
     if (duplicate && !duplicate.deleteFlag) {
       throw new AppError("Plate number already exists", 409);
     }
 
     const truck = await this.repository.create({
+      tenantId: scopedTenantId,
+      branchId: context.branchId ?? null,
       plateNumber,
       model: payload.model ?? null,
       brand: payload.brand ?? null,
@@ -97,20 +111,22 @@ export class TrucksService {
     return { id: Number(truck.id) };
   }
 
-  async update(id, payload, context = {}) {
-    const existing = await this.repository.findById(id);
+  async update(tenantId, id, payload, context = {}) {
+    const scopedTenantId = requireTenantId(tenantId);
+    const existing = await this.repository.findById(scopedTenantId, id);
     if (!existing) {
       throw new AppError("Truck not found", 404);
     }
 
     if (payload.plateNumber) {
-      const duplicate = await this.repository.findByPlateNumber(payload.plateNumber.trim());
+      const duplicate = await this.repository.findByPlateNumber(scopedTenantId, payload.plateNumber.trim());
       if (duplicate && Number(duplicate.id) !== Number(id) && !duplicate.deleteFlag) {
         throw new AppError("Plate number already exists", 409);
       }
     }
 
-    await this.repository.update(id, {
+    await this.repository.update(scopedTenantId, id, {
+      branchId: context.branchId ?? existing.branchId ?? null,
       plateNumber: payload.plateNumber === undefined ? existing.plateNumber : payload.plateNumber.trim(),
       model: payload.model === undefined ? existing.model : payload.model,
       brand: payload.brand === undefined ? existing.brand : payload.brand,
@@ -123,13 +139,14 @@ export class TrucksService {
     });
   }
 
-  async delete(id, context = {}) {
-    const existing = await this.repository.findById(id);
+  async delete(tenantId, id, context = {}) {
+    const scopedTenantId = requireTenantId(tenantId);
+    const existing = await this.repository.findById(scopedTenantId, id);
     if (!existing) {
       throw new AppError("Truck not found", 404);
     }
 
-    await this.repository.update(id, {
+    await this.repository.update(scopedTenantId, id, {
       deleteFlag: true,
       status: "inactive",
       updatedIp: context.ipAddress ?? null

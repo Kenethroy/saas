@@ -1,11 +1,15 @@
 import { ReportsService } from "#modules/reports/reports.service";
 
 const service = new ReportsService();
+const getTenantId = (req) => req.auth?.user?.tenantId ?? null;
+const getBranchId = (req) => req.auth?.branch?.id ?? null;
 
 export const reportsController = {
   async salesSummary(req, res, next) {
     try {
-      const data = await service.getSalesSummary(req.query);
+      const data = await service.getSalesSummary(getTenantId(req), req.query, {
+        branchId: getBranchId(req)
+      });
       res.status(200).json({
         success: true,
         data
@@ -17,7 +21,9 @@ export const reportsController = {
 
   async purchaseSummary(req, res, next) {
     try {
-      const data = await service.getPurchaseSummary(req.query);
+      const data = await service.getPurchaseSummary(getTenantId(req), req.query, {
+        branchId: getBranchId(req)
+      });
       res.status(200).json({
         success: true,
         data
@@ -29,7 +35,9 @@ export const reportsController = {
 
   async profitLoss(req, res, next) {
     try {
-      const data = await service.getProfitLoss(req.query);
+      const data = await service.getProfitLoss(getTenantId(req), req.query, {
+        branchId: getBranchId(req)
+      });
       res.status(200).json({
         success: true,
         data
@@ -41,7 +49,9 @@ export const reportsController = {
 
   async inventoryVelocity(req, res, next) {
     try {
-      const result = await service.getInventoryVelocity(req.query);
+      const result = await service.getInventoryVelocity(getTenantId(req), req.query, {
+        branchId: getBranchId(req)
+      });
       res.status(200).json({
         success: true,
         data: result.data,

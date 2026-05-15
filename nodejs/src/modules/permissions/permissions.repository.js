@@ -42,14 +42,15 @@ export class PermissionsRepository {
     })));
   }
 
-  async getUserPermissionLinks(userId) {
+  async getUserPermissionLinks(tenantId, userId) {
     return query(`
       SELECT up.*, p.id as p_id, p.slug as p_slug, p.name as p_name, p.description as p_description
       FROM user_permissions up
       JOIN permissions p ON up.permission_id = p.id
-      WHERE up.user_id = ?
+      JOIN users u ON up.user_id = u.id
+      WHERE up.user_id = ? AND u.tenant_id = ?
       ORDER BY p.id ASC
-    `, [userId]).then(rows => rows.map(row => ({
+    `, [userId, tenantId]).then(rows => rows.map(row => ({
       ...row,
       permission: {
         id: row.p_id,
@@ -60,12 +61,12 @@ export class PermissionsRepository {
     })));
   }
 
-  async findUserById(userId) {
-    const rows = await query("SELECT * FROM users WHERE id = ? AND delete_flg = 0", [userId]);
+  async findUserById(tenantId, userId) {
+    const rows = await query("SELECT * FROM users WHERE tenant_id = ? AND id = ? AND delete_flg = 0", [tenantId, userId]);
     return rows[0] || null;
   }
 
-  async listRoleSummaries() {
+  async listRoleSummaries(tenantId) {
     const [
       { total_permissions },
       roleCounts,
@@ -73,7 +74,7 @@ export class PermissionsRepository {
     ] = await Promise.all([
       query("SELECT COUNT(*) as total_permissions FROM permissions WHERE delete_flg = 0").then(r => r[0]),
       query("SELECT role, COUNT(permission_id) as permission_count FROM role_permissions GROUP BY role"),
-      query("SELECT role, COUNT(id) as user_count FROM users WHERE delete_flg = 0 GROUP BY role")
+      query("SELECT role, COUNT(id) as user_count FROM users WHERE tenant_id = ? AND delete_flg = 0 GROUP BY role", [tenantId])
     ]);
 
     return ["admin", "staff", "agent", "driver"].map((role) => {
@@ -102,8 +103,13 @@ export class PermissionsRepository {
     });
   }
 
-  async syncUserPermissions(userId, permissionIds) {
+  async syncUserPermissions(tenantId, userId, permissionIds) {
     return transaction(async (tx) => {
+      const [userRows] = await tx.execute("SELECT id FROM users WHERE tenant_id = ? AND id = ? LIMIT 1", [tenantId, userId]);
+      if (userRows.length === 0) {
+        return;
+      }
+
       await tx.execute("DELETE FROM user_permissions WHERE user_id = ?", [userId]);
       if (permissionIds.length > 0) {
         for (const pid of permissionIds) {

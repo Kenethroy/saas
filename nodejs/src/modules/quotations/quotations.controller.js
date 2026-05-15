@@ -17,7 +17,9 @@ export class QuotationsController {
 
   list = async (req, res, next) => {
     try {
-      const result = await this.service.list(this.getTenantId(req), req.query);
+      const result = await this.service.list(this.getTenantId(req), req.query, {
+        branchId: this.getBranchId(req)
+      });
       res.status(200).json(
         successResponse({
           message: "Quotations retrieved successfully",

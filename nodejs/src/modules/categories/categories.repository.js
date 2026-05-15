@@ -1,4 +1,5 @@
 import { query } from "#shared/database/mysql";
+import { getBranchInventoryQuantities } from "#shared/utils/branch-inventory";
 
 export class CategoriesRepository {
   async findPaginated(tenantId, filters = {}, pagination = {}) {
@@ -85,23 +86,64 @@ export class CategoriesRepository {
     };
   }
 
-  async findListWithVariantCounts(tenantId) {
-    const sql = `
-      SELECT *, 
-        (SELECT COUNT(*) FROM product_variants pv JOIN products p ON pv.product_id = p.id 
-         WHERE p.tenant_id = categories.tenant_id AND p.category_id = categories.id AND pv.delete_flg = 0 AND pv.status = 1 
-           AND p.delete_flg = 0 AND p.status = 1 AND pv.stock_quantity > 0) as variant_count
-      FROM categories 
-      WHERE tenant_id = ? AND delete_flg = 0 AND status = 1 
-      ORDER BY name ASC
-    `;
-    const rows = await query(sql, [tenantId]);
-    return rows.map(row => ({
-      id: row.id,
-      name: row.name,
-      status: row.status === 1,
-      variantCount: row.variant_count
-    }));
+  async findListWithVariantCounts(tenantId, options = {}) {
+    const branchId = options.branchId ?? null;
+    const rows = await query(
+      `
+        SELECT categories.*, pv.id AS product_variant_id
+        FROM categories
+        LEFT JOIN products p
+          ON p.tenant_id = categories.tenant_id
+         AND p.category_id = categories.id
+         AND p.delete_flg = 0
+         AND p.status = 1
+        LEFT JOIN product_variants pv
+          ON pv.tenant_id = categories.tenant_id
+         AND pv.product_id = p.id
+         AND pv.delete_flg = 0
+         AND pv.status = 1
+        WHERE categories.tenant_id = ?
+          AND categories.delete_flg = 0
+          AND categories.status = 1
+        ORDER BY categories.name ASC, pv.id ASC
+      `,
+      [tenantId]
+    );
+
+    const variantIds = rows
+      .map((row) => Number(row.product_variant_id))
+      .filter((variantId) => Number.isInteger(variantId) && variantId > 0);
+    const branchQuantities = branchId
+      ? (await getBranchInventoryQuantities({
+          tenantId,
+          branchId,
+          variantIds
+        })).quantities
+      : null;
+
+    const categoryMap = new Map();
+    for (const row of rows) {
+      const categoryId = Number(row.id);
+      const existing = categoryMap.get(categoryId) ?? {
+        id: row.id,
+        name: row.name,
+        status: row.status === 1,
+        variantCount: 0
+      };
+
+      const variantId = Number(row.product_variant_id);
+      if (variantId > 0) {
+        const hasStock = branchQuantities
+          ? Number(branchQuantities.get(variantId) ?? 0) > 0
+          : true;
+        if (hasStock) {
+          existing.variantCount += 1;
+        }
+      }
+
+      categoryMap.set(categoryId, existing);
+    }
+    return Array.from(categoryMap.values());
   }
 
   async findActiveOptions(tenantId) {

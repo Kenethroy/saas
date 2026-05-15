@@ -13,7 +13,7 @@ export const purchaseOrdersService = {
       search,
       status,
       supplierId,
-      branchId: filters.branchId ?? null
+      branchId = null
     } = filters;
     const { items, total } = await purchaseOrdersRepository.findPaginated(tenantId, {
       page,

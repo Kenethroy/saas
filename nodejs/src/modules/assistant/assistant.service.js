@@ -159,6 +159,14 @@ function resolveSemanticCustomerId(matches = []) {
   return Number(top.document.entityId);
 }
 
+function requireTenantId(tenantId) {
+  const normalized = Number(tenantId);
+  if (!normalized) {
+    throw new AppError("Tenant context is required", 401);
+  }
+  return normalized;
+}
+
 export class AssistantService {
   constructor(
     repository = new AssistantRepository(),
@@ -184,43 +192,44 @@ export class AssistantService {
     this.activityLogs = new ActivityLogsService();
   }
 
-  async query({ question, context = {}, user = null, ipAddress = null, userAgent = null }) {
+  async query({ tenantId, question, context = {}, user = null, ipAddress = null, userAgent = null }) {
+    const scopedTenantId = requireTenantId(tenantId);
     const customerId = context.customerId ? Number(context.customerId) : null;
 
     try {
       let response;
-      const semanticMatches = await this.safeRetrieveSemanticMatches(question, {
+      const semanticMatches = await this.safeRetrieveSemanticMatches(scopedTenantId, question, {
         customerId
       });
 
       if (customerId) {
-        response = await this.buildCustomerAnswer(customerId, question, {
+        response = await this.buildCustomerAnswer(scopedTenantId, customerId, question, {
           semanticMatches
         });
       } else if (looksLikeOverdueList(question)) {
-        response = await this.buildOverdueListAnswer();
+        response = await this.buildOverdueListAnswer(scopedTenantId);
       } else if (looksLikeOutstandingList(question)) {
-        response = await this.buildOutstandingListAnswer();
+        response = await this.buildOutstandingListAnswer(scopedTenantId);
       } else if (looksLikeTopProductsList(question)) {
-        response = await this.buildTopProductsListAnswer();
+        response = await this.buildTopProductsListAnswer(scopedTenantId);
       } else if (looksLikeTopSuppliersList(question)) {
-        response = await this.buildTopSuppliersListAnswer();
+        response = await this.buildTopSuppliersListAnswer(scopedTenantId);
       } else {
-        const matches = await this.repository.findCustomerMatches(question, 5);
+        const matches = await this.repository.findCustomerMatches(scopedTenantId, question, 5);
         const topSemantic = semanticMatches[0];
         const semanticEntityId = topSemantic?.document?.entityId;
         const semanticEntityType = topSemantic?.document?.entityType;
 
         if (matches.length === 1 || (matches.length > 1 && (matches[0].score ?? 0) >= ((matches[1]?.score ?? 0) + 3))) {
-          response = await this.buildCustomerAnswer(matches[0].id, question, {
+          response = await this.buildCustomerAnswer(scopedTenantId, matches[0].id, question, {
             semanticMatches
           });
         } else if (semanticEntityType === "product" && semanticEntityId) {
-          response = await this.buildProductAnswer(semanticEntityId, question, { semanticMatches });
+          response = await this.buildProductAnswer(scopedTenantId, semanticEntityId, question, { semanticMatches });
         } else if (semanticEntityType === "supplier" && semanticEntityId) {
-          response = await this.buildSupplierAnswer(semanticEntityId, question, { semanticMatches });
+          response = await this.buildSupplierAnswer(scopedTenantId, semanticEntityId, question, { semanticMatches });
         } else if (semanticEntityType === "customer" && semanticEntityId) {
-          response = await this.buildCustomerAnswer(semanticEntityId, question, { semanticMatches });
+          response = await this.buildCustomerAnswer(scopedTenantId, semanticEntityId, question, { semanticMatches });
         } else {
           response = {
             mode: "deterministic",
@@ -256,6 +265,7 @@ export class AssistantService {
       const finalized = await this.maybeUpgradeWithAi(question, response);
 
       await this.safePersistQuery({
+        tenantId: scopedTenantId,
         userId: user?.id ?? null,
         question,
         answer: finalized.answer,
@@ -272,6 +282,7 @@ export class AssistantService {
       });
 
       await this.safeWriteActivityLog({
+        tenantId: scopedTenantId,
         userId: user?.id ?? null,
         action: "ASSISTANT_QUERY",
         module: "ASSISTANT",
@@ -290,6 +301,7 @@ export class AssistantService {
       return finalized;
     } catch (error) {
       await this.safePersistQuery({
+        tenantId: scopedTenantId,
         userId: user?.id ?? null,
         question,
         answer: null,
@@ -310,7 +322,8 @@ export class AssistantService {
     }
   }
 
-  async reindex({ scope = ["customers"], limit = null, user = null, ipAddress = null, userAgent = null }) {
+  async reindex({ tenantId, scope = ["customers"], limit = null, user = null, ipAddress = null, userAgent = null }) {
+    const scopedTenantId = requireTenantId(tenantId);
     const normalizedScope = Array.isArray(scope) && scope.length > 0 ? scope : ["customers"];
     const result = {
       scope: normalizedScope,
@@ -320,24 +333,25 @@ export class AssistantService {
     };
 
     if (normalizedScope.includes("customers")) {
-      const indexed = await this.indexer.reindexCustomers({ limit });
+      const indexed = await this.indexer.reindexCustomers(scopedTenantId, { limit });
       result.processedCustomers = indexed.processed;
       result.withEmbeddings = indexed.withEmbeddings;
     }
 
     if (normalizedScope.includes("products")) {
-      const indexed = await this.indexer.reindexProducts({ limit });
+      const indexed = await this.indexer.reindexProducts(scopedTenantId, { limit });
       result.processedProducts = indexed.processed;
     }
 
     if (normalizedScope.includes("suppliers")) {
-      const indexed = await this.indexer.reindexSuppliers({ limit });
+      const indexed = await this.indexer.reindexSuppliers(scopedTenantId, { limit });
       result.processedSuppliers = indexed.processed;
     }
 
-    result.indexStats = await this.safeGetIndexStats();
+    result.indexStats = await this.safeGetIndexStats(scopedTenantId);
 
     await this.safeWriteActivityLog({
+      tenantId: scopedTenantId,
       userId: user?.id ?? null,
       action: "ASSISTANT_REINDEX",
       module: "ASSISTANT",
@@ -350,8 +364,8 @@ export class AssistantService {
     return result;
   }
 
-  async getStatus() {
-    const indexStats = await this.safeGetIndexStats();
+  async getStatus(tenantId) {
+    const indexStats = await this.safeGetIndexStats(requireTenantId(tenantId));
 
     return {
       ai: {
@@ -408,16 +422,16 @@ export class AssistantService {
     }
   }
 
-  async safeRetrieveSemanticMatches(question, { customerId = null } = {}) {
+  async safeRetrieveSemanticMatches(tenantId, question, { customerId = null } = {}) {
     try {
-      return await this.retrieveSemanticMatches(question, { customerId });
+      return await this.retrieveSemanticMatches(tenantId, question, { customerId });
     } catch (error) {
       logger.warn({ err: error }, "Assistant semantic retrieval failed");
       return [];
     }
   }
 
-  async retrieveSemanticMatches(question, { customerId = null } = {}) {
+  async retrieveSemanticMatches(tenantId, question, { customerId = null } = {}) {
     const tokens = tokenizeQuestion(question);
     const embeddings = await this.embeddingProvider.embedTexts([question]);
     const queryEmbedding = Array.isArray(embeddings?.[0]) ? embeddings[0] : null;
@@ -425,6 +439,7 @@ export class AssistantService {
     if (tokens.length === 0 && !queryEmbedding) return [];
 
     const rows = await this.repository.fetchRelevantChunks({
+      tenantId,
       entityId: customerId,
       entityType: customerId ? "customer" : null,
       tokens,
@@ -462,17 +477,17 @@ export class AssistantService {
       .slice(0, 6);
   }
 
-  async safeGetIndexStats() {
+  async safeGetIndexStats(tenantId) {
     try {
-      return await this.repository.getIndexStats();
+      return await this.repository.getIndexStats(tenantId);
     } catch (error) {
       logger.warn({ err: error }, "Assistant index stats retrieval failed");
       return { documents: 0, chunks: 0 };
     }
   }
 
-  async buildOverdueListAnswer() {
-    const rows = await this.repository.listOverdueCustomers(5);
+  async buildOverdueListAnswer(tenantId) {
+    const rows = await this.repository.listOverdueCustomers(tenantId, 5);
 
     if (rows.length === 0) {
       return {
@@ -511,8 +526,8 @@ export class AssistantService {
     };
   }
 
-  async buildOutstandingListAnswer() {
-    const rows = await this.repository.listOutstandingCustomers(5);
+  async buildOutstandingListAnswer(tenantId) {
+    const rows = await this.repository.listOutstandingCustomers(tenantId, 5);
 
     if (rows.length === 0) {
       return {
@@ -551,11 +566,11 @@ export class AssistantService {
     };
   }
 
-  async buildCustomerAnswer(customerId, question, { semanticMatches = [] } = {}) {
-    const details = await this.customersService.getDetails(customerId);
-    const unpaid = await this.customersService.getUnpaidOrders(customerId);
-    const payments = await this.customersService.getPayments(customerId, { page: 1, limit: 3 });
-    const performanceInsight = await this.customersService.getPerformanceInsight(customerId);
+  async buildCustomerAnswer(tenantId, customerId, question, { semanticMatches = [] } = {}) {
+    const details = await this.customersService.getDetails(tenantId, customerId);
+    const unpaid = await this.customersService.getUnpaidOrders(tenantId, customerId);
+    const payments = await this.customersService.getPayments(tenantId, customerId, { page: 1, limit: 3 });
+    const performanceInsight = await this.customersService.getPerformanceInsight(tenantId, customerId);
 
     if (!details?.customer) throw new AppError("Customer context could not be resolved", 404);
 
@@ -615,8 +630,8 @@ export class AssistantService {
     };
   }
 
-  async buildProductAnswer(productId, question, { semanticMatches = [] } = {}) {
-    const product = await this.productsService.getById(productId);
+  async buildProductAnswer(tenantId, productId, question, { semanticMatches = [] } = {}) {
+    const product = await this.productsService.getById(tenantId, productId);
     const topSemantic = semanticMatches.find(m => Number(m.document?.entityId) === Number(productId)) ?? null;
 
     const variantLines = (product.variants ?? []).map(v => 
@@ -648,8 +663,8 @@ export class AssistantService {
     };
   }
 
-  async buildSupplierAnswer(supplierId, question, { semanticMatches = [] } = {}) {
-    const details = await this.suppliersService.getSupplierDetails(supplierId);
+  async buildSupplierAnswer(tenantId, supplierId, question, { semanticMatches = [] } = {}) {
+    const details = await this.suppliersService.getSupplierDetails(tenantId, supplierId);
     const supplier = details.data.supplier;
     const stats = details.data.statistics;
     const label = supplier.companyName || supplier.name;
@@ -679,8 +694,8 @@ export class AssistantService {
     };
   }
 
-  async buildTopProductsListAnswer() {
-    const products = await this.repository.fetchTopProducts(5);
+  async buildTopProductsListAnswer(tenantId) {
+    const products = await this.repository.fetchTopProducts(tenantId, 5);
 
     if (products.length === 0) {
       return {
@@ -717,8 +732,8 @@ export class AssistantService {
     };
   }
 
-  async buildTopSuppliersListAnswer() {
-    const suppliers = await this.repository.fetchTopSuppliers(5);
+  async buildTopSuppliersListAnswer(tenantId) {
+    const suppliers = await this.repository.fetchTopSuppliers(tenantId, 5);
 
     if (suppliers.length === 0) {
       return {

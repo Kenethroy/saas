@@ -1,5 +1,6 @@
 import { query, transaction } from "#shared/database/mysql";
 import { AppError } from "#shared/utils/app-error";
+import { applyBranchInventoryDelta } from "#shared/utils/branch-inventory";
 
 let restockFlagColumnAvailablePromise;
 
@@ -399,40 +400,33 @@ export class StockAdjustmentsRepository {
           );
         }
 
-        if (change < 0) {
-          const [updateResult] = await tx.execute(`
-            UPDATE product_variants SET stock_quantity = stock_quantity - ? 
-            WHERE tenant_id = ? AND id = ? AND delete_flg = 0 AND stock_quantity >= ?
-          `, [Math.abs(change), tenantId, variantId, Math.abs(change)]);
-          if (updateResult.affectedRows === 0) {
+        let movement;
+        try {
+          movement = await applyBranchInventoryDelta(tx, {
+            tenantId,
+            branchId: header.branch_id ? Number(header.branch_id) : null,
+            productVariantId: variantId,
+            quantityChange: change
+          });
+        } catch (error) {
+          if (error instanceof AppError && error.message === "Branch inventory adjustment would result in negative stock.") {
             throw new AppError("Insufficient stock for one or more items.", 422);
           }
-        } else {
-          await tx.execute(
-            "UPDATE product_variants SET stock_quantity = stock_quantity + ? WHERE tenant_id = ? AND id = ? AND delete_flg = 0",
-            [change, tenantId, variantId]
-          );
+          throw error;
         }
-
-        const [variantRows] = await tx.execute(
-          "SELECT stock_quantity, product_id FROM product_variants WHERE tenant_id = ? AND id = ?",
-          [tenantId, variantId]
-        );
-        const quantityAfter = Number(variantRows[0].stock_quantity);
-        const quantityBefore = quantityAfter - change;
 
         await tx.execute(
           "UPDATE inventory_adjustment_items SET quantity_before = ?, quantity_after = ? WHERE tenant_id = ? AND id = ?",
-          [quantityBefore, quantityAfter, tenantId, item.id]
+          [movement.quantityBefore, movement.quantityAfter, tenantId, item.id]
         );
 
         await tx.execute(`
           INSERT INTO inventory_transactions (
             tenant_id, branch_id, product_id, product_variant_id, quantity_before, quantity_change, quantity_after,
             transaction_type, reference_type, reference_id, reason, created_by, created_ip, updated_ip
-          ) VALUES (?, NULL, ?, ?, ?, ?, ?, 3, 'inventory_adjustment', ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, 3, 'inventory_adjustment', ?, ?, ?, ?, ?)
         `, [
-          tenantId, variantRows[0].product_id, variantId, quantityBefore, change, quantityAfter,
+          tenantId, movement.branchId, movement.productId, variantId, movement.quantityBefore, change, movement.quantityAfter,
           id, `Inventory adjustment approved - ${header.adjustment_number}${restockFlag ? "" : " (non-restockable)"}`,
           userId || null, ipAddress, ipAddress
         ]);

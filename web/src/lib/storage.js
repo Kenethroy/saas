@@ -1,4 +1,5 @@
 const SESSION_KEY = "saas-web-session";
+const ADMIN_SESSION_KEY = "saas-web-admin-session";
 const BUSINESS_DRAFT_KEY = "saas-web-business-draft";
 const CHECKOUT_KEY = "saas-web-last-checkout";
 
@@ -24,6 +25,15 @@ export const platformStorage = {
   },
   clearSession() {
     window.localStorage.removeItem(SESSION_KEY);
+  },
+  getAdminSession() {
+    return readJson(ADMIN_SESSION_KEY, null);
+  },
+  setAdminSession(value) {
+    writeJson(ADMIN_SESSION_KEY, value);
+  },
+  clearAdminSession() {
+    window.localStorage.removeItem(ADMIN_SESSION_KEY);
   },
   getBusinessDraft() {
     return readJson(BUSINESS_DRAFT_KEY, null);

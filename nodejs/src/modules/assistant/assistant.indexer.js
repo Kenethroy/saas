@@ -182,12 +182,12 @@ export class AssistantIndexer {
     this.embeddingProvider = embeddingProvider;
   }
 
-  async reindexCustomers({ limit = null } = {}) {
-    const customers = await this.repository.listIndexableCustomers(limit);
+  async reindexCustomers(tenantId, { limit = null } = {}) {
+    const customers = await this.repository.listIndexableCustomers(tenantId, limit);
     let processed = 0;
 
     for (const customer of customers) {
-      await this.reindexCustomer(Number(customer.id));
+      await this.reindexCustomer(tenantId, Number(customer.id));
       processed += 1;
     }
 
@@ -197,11 +197,11 @@ export class AssistantIndexer {
     };
   }
 
-  async reindexCustomer(customerId) {
-    const details = await this.customersService.getDetails(customerId);
-    const performanceInsight = await this.customersService.getPerformanceInsight(customerId);
-    const unpaid = await this.customersService.getUnpaidOrders(customerId);
-    const payments = await this.customersService.getPayments(customerId, { page: 1, limit: 3 });
+  async reindexCustomer(tenantId, customerId) {
+    const details = await this.customersService.getDetails(tenantId, customerId);
+    const performanceInsight = await this.customersService.getPerformanceInsight(tenantId, customerId);
+    const unpaid = await this.customersService.getUnpaidOrders(tenantId, customerId);
+    const payments = await this.customersService.getPayments(tenantId, customerId, { page: 1, limit: 3 });
 
     const customer = details.customer;
     const statistics = details.statistics ?? {};
@@ -232,6 +232,7 @@ export class AssistantIndexer {
     }));
 
     await this.repository.upsertIndexDocument({
+      tenantId,
       documentKey: `customer:${customerId}`,
       sourceType: "database",
       module: "customers",
@@ -251,12 +252,12 @@ export class AssistantIndexer {
     return { customerId, chunks: chunks.length };
   }
 
-  async reindexProducts({ limit = null } = {}) {
-    const products = await this.repository.listIndexableProducts(limit);
+  async reindexProducts(tenantId, { limit = null } = {}) {
+    const products = await this.repository.listIndexableProducts(tenantId, limit);
     let processed = 0;
 
     for (const product of products) {
-      await this.reindexProduct(Number(product.id));
+      await this.reindexProduct(tenantId, Number(product.id));
       processed += 1;
     }
 
@@ -266,8 +267,8 @@ export class AssistantIndexer {
     };
   }
 
-  async reindexProduct(productId) {
-    const product = await this.productsService.getById(productId);
+  async reindexProduct(tenantId, productId) {
+    const product = await this.productsService.getById(tenantId, productId);
     const sections = buildProductSections({ product });
     const chunkContents = splitSectionsIntoChunks(sections);
     const embeddings = await this.embeddingProvider.embedTexts(chunkContents);
@@ -286,6 +287,7 @@ export class AssistantIndexer {
     }));
 
     await this.repository.upsertIndexDocument({
+      tenantId,
       documentKey: `product:${productId}`,
       sourceType: "database",
       module: "products",
@@ -304,12 +306,12 @@ export class AssistantIndexer {
     return { productId, chunks: chunks.length };
   }
 
-  async reindexSuppliers({ limit = null } = {}) {
-    const suppliers = await this.repository.listIndexableSuppliers(limit);
+  async reindexSuppliers(tenantId, { limit = null } = {}) {
+    const suppliers = await this.repository.listIndexableSuppliers(tenantId, limit);
     let processed = 0;
 
     for (const supplier of suppliers) {
-      await this.reindexSupplier(Number(supplier.id));
+      await this.reindexSupplier(tenantId, Number(supplier.id));
       processed += 1;
     }
 
@@ -319,8 +321,8 @@ export class AssistantIndexer {
     };
   }
 
-  async reindexSupplier(supplierId) {
-    const details = await this.suppliersService.getSupplierDetails(supplierId);
+  async reindexSupplier(tenantId, supplierId) {
+    const details = await this.suppliersService.getSupplierDetails(tenantId, supplierId);
     const supplier = details.data.supplier;
     const statistics = details.data.statistics;
     const title = supplier.companyName || supplier.name;
@@ -343,6 +345,7 @@ export class AssistantIndexer {
     }));
 
     await this.repository.upsertIndexDocument({
+      tenantId,
       documentKey: `supplier:${supplierId}`,
       sourceType: "database",
       module: "suppliers",
@@ -361,4 +364,3 @@ export class AssistantIndexer {
     return { supplierId, chunks: chunks.length };
   }
 }
-

@@ -1,4 +1,5 @@
 import { query, transaction } from "#shared/database/mysql";
+import { applyBranchInventoryDelta } from "#shared/utils/branch-inventory";
 
 export class InventoryRepository {
   async findPaginatedTransactions(tenantId, { page, perPage, productId, productVariantId, transactionType, referenceType, search, sortOrder = 'desc', branchId = null }) {
@@ -83,24 +84,19 @@ export class InventoryRepository {
 
     return transaction(async (tx) => {
       const [vRows] = await tx.execute(
-        "SELECT id, tenant_id, product_id, stock_quantity, name FROM product_variants WHERE tenant_id = ? AND id = ? AND delete_flg = 0",
+        "SELECT id, tenant_id, product_id, name FROM product_variants WHERE tenant_id = ? AND id = ? AND delete_flg = 0",
         [tenantId, payload.productVariantId]
       );
       if (vRows.length === 0) throw new Error("Product variant not found");
       const variant = vRows[0];
 
-      const before = Number(variant.stock_quantity || 0);
       const change = Number(payload.quantityChange || 0);
-      const after = before + change;
-
-      if (!Number.isFinite(after) || after < 0) {
-        throw new Error("Stock adjustment would result in negative stock.");
-      }
-
-      await tx.execute(
-        "UPDATE product_variants SET stock_quantity = ?, updated_ip = ? WHERE tenant_id = ? AND id = ?",
-        [after, ipAddress, tenantId, variant.id]
-      );
+      const movement = await applyBranchInventoryDelta(tx, {
+        tenantId,
+        branchId,
+        productVariantId: variant.id,
+        quantityChange: change
+      });
 
       const [itResult] = await tx.execute(`
         INSERT INTO inventory_transactions (
@@ -108,7 +104,7 @@ export class InventoryRepository {
           transaction_type, reference_type, reference_id, reason, created_by, created_ip, updated_ip
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [
-        tenantId, branchId ?? null, variant.product_id, variant.id, before, change, after,
+        tenantId, movement.branchId, movement.productId, variant.id, movement.quantityBefore, change, movement.quantityAfter,
         3, "stock_adjustment", null, payload.reason || `Stock adjustment for ${variant.name}`,
         userId || null, ipAddress, ipAddress
       ]);

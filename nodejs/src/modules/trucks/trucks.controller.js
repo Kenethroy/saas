@@ -9,7 +9,9 @@ export class TrucksController {
 
   list = async (req, res, next) => {
     try {
-      const result = await this.service.list(req.query);
+      const result = await this.service.list(req.auth?.user?.tenantId, req.query, {
+        branchId: req.auth?.branch?.id ?? null
+      });
       res.status(200).json(
         successResponse({
           message: "Trucks retrieved successfully",
@@ -24,7 +26,7 @@ export class TrucksController {
 
   getById = async (req, res, next) => {
     try {
-      const data = await this.service.getById(req.params.id);
+      const data = await this.service.getById(req.auth?.user?.tenantId, req.params.id);
       res.status(200).json(
         successResponse({
           message: "Truck retrieved successfully",
@@ -38,7 +40,9 @@ export class TrucksController {
 
   listForAssignment = async (req, res, next) => {
     try {
-      const data = await this.service.listForAssignment(req.query);
+      const data = await this.service.listForAssignment(req.auth?.user?.tenantId, req.query, {
+        branchId: req.auth?.branch?.id ?? null
+      });
       res.status(200).json(
         successResponse({
           message: "Truck list retrieved successfully",
@@ -52,7 +56,8 @@ export class TrucksController {
 
   create = async (req, res, next) => {
     try {
-      const data = await this.service.create(req.body, {
+      const data = await this.service.create(req.auth?.user?.tenantId, req.body, {
+        branchId: req.auth?.branch?.id ?? null,
         ipAddress: getPersistedRequestIp(req)
       });
       res.status(201).json(
@@ -68,7 +73,8 @@ export class TrucksController {
 
   update = async (req, res, next) => {
     try {
-      await this.service.update(req.params.id, req.body, {
+      await this.service.update(req.auth?.user?.tenantId, req.params.id, req.body, {
+        branchId: req.auth?.branch?.id ?? null,
         ipAddress: getPersistedRequestIp(req)
       });
       res.status(200).json(
@@ -83,7 +89,7 @@ export class TrucksController {
 
   delete = async (req, res, next) => {
     try {
-      await this.service.delete(req.params.id, {
+      await this.service.delete(req.auth?.user?.tenantId, req.params.id, {
         ipAddress: getPersistedRequestIp(req)
       });
       res.status(200).json(

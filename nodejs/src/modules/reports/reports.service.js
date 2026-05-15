@@ -387,14 +387,14 @@ export class ReportsService {
     this.repository = repository;
   }
 
-  async getSalesSummary(filters) {
+  async getSalesSummary(tenantId, filters, context = {}) {
     const range = getDateRange(filters.period, filters.startDate, filters.endDate);
     const comparisonRange = getComparisonRange(range.start, range.end, filters.compareWith);
 
     const [orders, comparisonOrders, newCustomers] = await Promise.all([
-      this.repository.findSalesOrdersInRange(range.start, range.end),
-      comparisonRange ? this.repository.findSalesOrdersInRange(comparisonRange.start, comparisonRange.end) : Promise.resolve([]),
-      this.repository.countNewCustomersInRange(range.start, range.end)
+      this.repository.findSalesOrdersInRange(tenantId, range.start, range.end, { branchId: context.branchId ?? null }),
+      comparisonRange ? this.repository.findSalesOrdersInRange(tenantId, comparisonRange.start, comparisonRange.end, { branchId: context.branchId ?? null }) : Promise.resolve([]),
+      this.repository.countNewCustomersInRange(tenantId, range.start, range.end)
     ]);
 
     const summary = summarizeSalesOrders(orders);
@@ -419,14 +419,14 @@ export class ReportsService {
     };
   }
 
-  async getPurchaseSummary(filters) {
+  async getPurchaseSummary(tenantId, filters, context = {}) {
     const range = getDateRange(filters.period, filters.startDate, filters.endDate);
     const comparisonRange = getComparisonRange(range.start, range.end, filters.compareWith);
 
     const [orders, comparisonOrders, newSuppliers] = await Promise.all([
-      this.repository.findPurchaseOrdersInRange(range.start, range.end),
-      comparisonRange ? this.repository.findPurchaseOrdersInRange(comparisonRange.start, comparisonRange.end) : Promise.resolve([]),
-      this.repository.countNewSuppliersInRange(range.start, range.end)
+      this.repository.findPurchaseOrdersInRange(tenantId, range.start, range.end, { branchId: context.branchId ?? null }),
+      comparisonRange ? this.repository.findPurchaseOrdersInRange(tenantId, comparisonRange.start, comparisonRange.end, { branchId: context.branchId ?? null }) : Promise.resolve([]),
+      this.repository.countNewSuppliersInRange(tenantId, range.start, range.end)
     ]);
 
     const summary = summarizePurchaseOrders(orders);
@@ -451,7 +451,7 @@ export class ReportsService {
     };
   }
 
-  async getProfitLoss(filters) {
+  async getProfitLoss(tenantId, filters, context = {}) {
     const range = getDateRange(filters.period, filters.startDate, filters.endDate);
     const comparisonRange = getComparisonRange(range.start, range.end, filters.compareWith);
 
@@ -465,14 +465,14 @@ export class ReportsService {
       comparisonExpenses,
       comparisonAdjustments
     ] = await Promise.all([
-      this.repository.findInvoicesInRange(range.start, range.end),
-      this.repository.findCustomerReturnsInRange(range.start, range.end),
-      this.repository.findExpensesInRange(range.start, range.end),
-      this.repository.findLossAdjustmentsInRange(range.start, range.end),
-      comparisonRange ? this.repository.findInvoicesInRange(comparisonRange.start, comparisonRange.end) : Promise.resolve([]),
-      comparisonRange ? this.repository.findCustomerReturnsInRange(comparisonRange.start, comparisonRange.end) : Promise.resolve([]),
-      comparisonRange ? this.repository.findExpensesInRange(comparisonRange.start, comparisonRange.end) : Promise.resolve([]),
-      comparisonRange ? this.repository.findLossAdjustmentsInRange(comparisonRange.start, comparisonRange.end) : Promise.resolve([])
+      this.repository.findInvoicesInRange(tenantId, range.start, range.end, { branchId: context.branchId ?? null }),
+      this.repository.findCustomerReturnsInRange(tenantId, range.start, range.end, { branchId: context.branchId ?? null }),
+      this.repository.findExpensesInRange(tenantId, range.start, range.end, { branchId: context.branchId ?? null }),
+      this.repository.findLossAdjustmentsInRange(tenantId, range.start, range.end, { branchId: context.branchId ?? null }),
+      comparisonRange ? this.repository.findInvoicesInRange(tenantId, comparisonRange.start, comparisonRange.end, { branchId: context.branchId ?? null }) : Promise.resolve([]),
+      comparisonRange ? this.repository.findCustomerReturnsInRange(tenantId, comparisonRange.start, comparisonRange.end, { branchId: context.branchId ?? null }) : Promise.resolve([]),
+      comparisonRange ? this.repository.findExpensesInRange(tenantId, comparisonRange.start, comparisonRange.end, { branchId: context.branchId ?? null }) : Promise.resolve([]),
+      comparisonRange ? this.repository.findLossAdjustmentsInRange(tenantId, comparisonRange.start, comparisonRange.end, { branchId: context.branchId ?? null }) : Promise.resolve([])
     ]);
 
     const invoiceSummary = summarizeInvoices(invoices);
@@ -545,8 +545,10 @@ export class ReportsService {
     };
   }
 
-  async getInventoryVelocity(filters) {
-    const source = await this.repository.findInventoryVelocitySource(filters.days);
+  async getInventoryVelocity(tenantId, filters, context = {}) {
+    const source = await this.repository.findInventoryVelocitySource(tenantId, filters.days, {
+      branchId: context.branchId ?? null
+    });
     const soldMap = new Map(source.soldInPeriod.map((entry) => [entry.productId, entry]));
     const lastSaleMap = new Map(source.historicalSales.map((entry) => [entry.productId, entry.orderDate]));
 

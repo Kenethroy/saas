@@ -1,9 +1,10 @@
 import { query, transaction } from "#shared/database/mysql";
 import { deliverSalesOrder } from "#modules/sales-orders/sales-orders.delivery";
 import { allocateDocumentNumber } from "#shared/utils/document-sequences";
+import { getBranchInventoryQuantities } from "#shared/utils/branch-inventory";
 
 export class SalesOrdersRepository {
-  async findPaginated(tenantId, { page, perPage, search, status }) {
+  async findPaginated(tenantId, { page, perPage, search, status, branchId = null }) {
     const offset = (page - 1) * perPage;
 
     let sql = `
@@ -27,6 +28,11 @@ export class SalesOrdersRepository {
       params.push(status);
     }
 
+    if (branchId) {
+      sql += " AND so.branch_id = ?";
+      params.push(Number(branchId));
+    }
+
     const countSql = `SELECT COUNT(*) as total ${sql}`;
     const dataSql = `
       SELECT so.*, c.name as customer_name, e.first_name as agent_first_name, e.last_name as agent_last_name, 
@@ -47,15 +53,17 @@ export class SalesOrdersRepository {
     const items = salesOrderIds.length
       ? await query(`
           SELECT soi.id, soi.sales_order_id, soi.product_id, soi.product_variant_id, soi.product_name, soi.variant_name,
-            soi.quantity, soi.unit_price, soi.unit_cost, soi.line_discount, soi.line_total, pv.stock_quantity
+            soi.quantity, soi.unit_price, soi.unit_cost, soi.line_discount, soi.line_total, pv.stock_quantity, so.branch_id
           FROM sales_order_items soi
+          JOIN sales_orders so ON soi.sales_order_id = so.id AND so.tenant_id = soi.tenant_id
           JOIN product_variants pv ON soi.product_variant_id = pv.id AND pv.tenant_id = soi.tenant_id
           WHERE soi.tenant_id = ? AND soi.sales_order_id IN (?)
           ORDER BY soi.sales_order_id ASC, soi.id ASC
         `, [tenantId, salesOrderIds])
       : [];
+    const stockAwareItems = await this._applyBranchStockToItems(tenantId, items);
 
-    const itemsBySalesOrderId = items.reduce((acc, item) => {
+    const itemsBySalesOrderId = stockAwareItems.reduce((acc, item) => {
       const salesOrderId = Number(item.sales_order_id);
       if (!acc.has(salesOrderId)) {
         acc.set(salesOrderId, []);
@@ -82,6 +90,7 @@ export class SalesOrdersRepository {
     const formattedRows = rows.map(row => ({
       ...row,
       id: row.id,
+      branchId: row.branch_id ? Number(row.branch_id) : null,
       salesOrderNumber: row.sales_order_number,
       customerId: row.customer_id,
       agentId: row.agent_id,
@@ -125,16 +134,18 @@ export class SalesOrdersRepository {
 
     const row = rows[0];
     const items = await query(`
-      SELECT soi.*, pv.stock_quantity
+      SELECT soi.*, pv.stock_quantity, ? AS branch_id
       FROM sales_order_items soi
       JOIN product_variants pv ON soi.product_variant_id = pv.id AND pv.tenant_id = soi.tenant_id
       WHERE soi.tenant_id = ? AND soi.sales_order_id = ?
       ORDER BY soi.id ASC
-    `, [tenantId, id]);
+    `, [row.branch_id ?? null, tenantId, id]);
+    const stockAwareItems = await this._applyBranchStockToItems(tenantId, items, row.branch_id ? Number(row.branch_id) : null);
 
     return {
       ...row,
       id: row.id,
+      branchId: row.branch_id ? Number(row.branch_id) : null,
       salesOrderNumber: row.sales_order_number,
       customerId: row.customer_id,
       agentId: row.agent_id,
@@ -153,8 +164,8 @@ export class SalesOrdersRepository {
       agent: row.agent_id ? { id: row.agent_id, firstName: row.agent_first_name, lastName: row.agent_last_name } : null,
       paymentTerm: row.payment_term_id ? { id: row.payment_term_id, name: row.pt_name } : null,
       invoice: row.invoice_id ? { id: row.invoice_id, invoiceNumber: row.invoice_number, status: row.invoice_status } : null,
-      itemCount: items.length,
-      items: items.map(item => ({
+      itemCount: stockAwareItems.length,
+      items: stockAwareItems.map(item => ({
         ...item,
         id: item.id,
         salesOrderId: item.sales_order_id,
@@ -208,7 +219,7 @@ export class SalesOrdersRepository {
     return rows[0] || null;
   }
 
-  async findProductVariantsByIds(tenantId, ids) {
+  async findProductVariantsByIds(tenantId, ids, options = {}) {
     if (ids.length === 0) return [];
     const sql = `
       SELECT pv.*, p.name as p_name
@@ -217,7 +228,8 @@ export class SalesOrdersRepository {
       WHERE pv.tenant_id = ? AND pv.id IN (?) AND pv.delete_flg = 0 AND pv.status = 1
     `;
     const rows = await query(sql, [tenantId, ids]);
-    return rows.map(row => ({
+    const stockAwareRows = await this._applyBranchStockToVariants(tenantId, rows, options.branchId ?? null);
+    return stockAwareRows.map(row => ({
       ...row,
       id: row.id,
       productId: row.product_id,
@@ -242,6 +254,11 @@ export class SalesOrdersRepository {
         AND so.status = 'processing'
     `;
 
+    if (options.branchId) {
+      sql += " AND so.branch_id = ?";
+      params.push(Number(options.branchId));
+    }
+
     if (options.excludeSalesOrderId) {
       sql += " AND soi.sales_order_id <> ?";
       params.push(Number(options.excludeSalesOrderId));
@@ -262,8 +279,8 @@ export class SalesOrdersRepository {
     return { ...rows[0], salesOrderNumber: rows[0].sales_order_number };
   }
 
-  async findForDeliverySelection(tenantId) {
-    const sql = `
+  async findForDeliverySelection(tenantId, { branchId = null } = {}) {
+    let sql = `
       SELECT so.*, c.name as customer_name, c.address as customer_address, c.phone as customer_phone, c.email as customer_email
       FROM sales_orders so
       JOIN customers c ON so.customer_id = c.id AND c.tenant_id = so.tenant_id
@@ -273,9 +290,14 @@ export class SalesOrdersRepository {
           JOIN deliveries d ON dl.delivery_id = d.id AND d.tenant_id = dl.tenant_id
           WHERE dl.tenant_id = so.tenant_id AND dl.sales_order_id = so.id AND d.delete_flg = 0 AND d.status <> 'cancelled'
         )
-      ORDER BY so.order_date DESC, so.id DESC
     `;
-    const rows = await query(sql, [tenantId]);
+    const params = [tenantId];
+    if (branchId) {
+      sql += " AND so.branch_id = ?";
+      params.push(Number(branchId));
+    }
+    sql += " ORDER BY so.order_date DESC, so.id DESC";
+    const rows = await query(sql, params);
     return rows.map(row => ({
       ...row,
       id: row.id,
@@ -451,5 +473,70 @@ export class SalesOrdersRepository {
         lineTotal: item.line_total
       }))
     };
+  }
+
+  async _applyBranchStockToVariants(tenantId, variants = [], branchId = null) {
+    if (!branchId || variants.length === 0) {
+      return variants;
+    }
+
+    const { quantities } = await getBranchInventoryQuantities({
+      tenantId,
+      branchId,
+      variantIds: variants.map((variant) => Number(variant.id))
+    });
+
+    return variants.map((variant) => ({
+      ...variant,
+      stock_quantity: quantities.has(Number(variant.id))
+        ? Number(quantities.get(Number(variant.id)))
+        : 0
+    }));
+  }
+
+  async _applyBranchStockToItems(tenantId, items = [], fallbackBranchId = null) {
+    if (!items.length) {
+      return items;
+    }
+
+    const groupedItems = items.reduce((acc, item) => {
+      const branchKey = item.branch_id ? Number(item.branch_id) : (fallbackBranchId ? Number(fallbackBranchId) : 0);
+      if (!acc.has(branchKey)) {
+        acc.set(branchKey, []);
+      }
+      acc.get(branchKey).push(item);
+      return acc;
+    }, new Map());
+
+    const stockByBranchVariantKey = new Map();
+
+    for (const [branchKey, branchItems] of groupedItems.entries()) {
+      if (!branchKey) {
+        continue;
+      }
+
+      const { quantities } = await getBranchInventoryQuantities({
+        tenantId,
+        branchId: branchKey,
+        variantIds: branchItems.map((item) => Number(item.product_variant_id))
+      });
+
+      for (const [variantId, quantity] of quantities.entries()) {
+        stockByBranchVariantKey.set(`${branchKey}:${variantId}`, Number(quantity));
+      }
+    }
+
+    return items.map((item) => {
+      const branchKey = item.branch_id ? Number(item.branch_id) : (fallbackBranchId ? Number(fallbackBranchId) : 0);
+      const variantId = Number(item.product_variant_id);
+      const stockQuantity = branchKey
+        ? Number(stockByBranchVariantKey.get(`${branchKey}:${variantId}`) ?? 0)
+        : Number(item.stock_quantity ?? 0);
+
+      return {
+        ...item,
+        stock_quantity: stockQuantity
+      };
+    });
   }
 }

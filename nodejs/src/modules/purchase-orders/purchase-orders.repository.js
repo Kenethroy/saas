@@ -1,4 +1,5 @@
 import { query, transaction } from "#shared/database/mysql";
+import { applyBranchInventoryDelta, getBranchInventoryQuantities } from "#shared/utils/branch-inventory";
 
 export const purchaseOrdersRepository = {
   async findPaginated(tenantId, { page, limit, search, status, supplierId, branchId = null }) {
@@ -102,6 +103,9 @@ export const purchaseOrdersRepository = {
       WHERE poi.tenant_id = ? AND poi.purchase_order_id = ?
       ORDER BY poi.id ASC
     `, [tenantId, id]);
+    const stockAwareItems = row.branch_id
+      ? await this._applyBranchStockToItems(tenantId, items, Number(row.branch_id))
+      : items;
 
     return {
       ...row,
@@ -126,7 +130,7 @@ export const purchaseOrdersRepository = {
         address: row.supplier_address
       },
       paymentTerm: row.payment_term_id ? { id: row.payment_term_id, name: row.pt_name, days: row.pt_days } : null,
-      items: items.map(item => ({
+      items: stockAwareItems.map(item => ({
         ...item,
         id: item.id,
         purchaseOrderId: item.purchase_order_id,
@@ -256,13 +260,14 @@ export const purchaseOrdersRepository = {
 
   async softDelete(tenantId, id, ipAddress) {
     await query("UPDATE purchase_orders SET delete_flg = 1, updated_ip = ? WHERE tenant_id = ? AND id = ?", [ipAddress, tenantId, id]);
-  }
-
-  ,
+  },
 
   async receivePurchaseOrder(tenantId, id, po, grnPayload, context = {}) {
     const { clientIp, userId } = context;
     const grnByItemId = new Map((grnPayload.items ?? []).map((g) => [Number(g.id), g]));
+    const branchId = po.branchId
+      ? Number(po.branchId)
+      : (po.branch_id ? Number(po.branch_id) : (context.branchId ? Number(context.branchId) : null));
 
     return transaction(async (tx) => {
       let receivedTotal = 0;
@@ -284,19 +289,20 @@ export const purchaseOrdersRepository = {
 
         if (receivedQty <= 0) continue;
 
-        await tx.execute("UPDATE product_variants SET stock_quantity = stock_quantity + ? WHERE tenant_id = ? AND id = ?", [receivedQty, tenantId, variantId]);
-
-        const [updatedVariantRows] = await tx.execute("SELECT stock_quantity FROM product_variants WHERE tenant_id = ? AND id = ?", [tenantId, variantId]);
-        const quantityAfter = Number(updatedVariantRows[0].stock_quantity);
-        const quantityBefore = quantityAfter - receivedQty;
+        const movement = await applyBranchInventoryDelta(tx, {
+          tenantId,
+          branchId,
+          productVariantId: variantId,
+          quantityChange: receivedQty
+        });
 
         await tx.execute(`
           INSERT INTO inventory_transactions (
             tenant_id, branch_id, product_id, product_variant_id, quantity_before, quantity_change, quantity_after,
             transaction_type, reference_type, reference_id, reason, created_by, created_ip, updated_ip
-          ) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
-          tenantId, item.productId, variantId, quantityBefore, receivedQty, quantityAfter,
+          tenantId, movement.branchId, movement.productId, variantId, movement.quantityBefore, receivedQty, movement.quantityAfter,
           1, "purchase_order", id, `GRN: Stock received from Purchase Order ${po.poNumber}`,
           userId || null, clientIp, clientIp
         ]);
@@ -332,5 +338,24 @@ export const purchaseOrdersRepository = {
 
       return id;
     }).then((resultId) => this.findById(tenantId, resultId));
+  },
+
+  async _applyBranchStockToItems(tenantId, items = [], branchId = null) {
+    if (!branchId || !items.length) {
+      return items;
+    }
+
+    const { quantities } = await getBranchInventoryQuantities({
+      tenantId,
+      branchId,
+      variantIds: items.map((item) => Number(item.product_variant_id))
+    });
+
+    return items.map((item) => ({
+      ...item,
+      stock_quantity: quantities.has(Number(item.product_variant_id))
+        ? Number(quantities.get(Number(item.product_variant_id)))
+        : 0
+    }));
   }
 };

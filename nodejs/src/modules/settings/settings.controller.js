@@ -10,7 +10,7 @@ export class SettingsController {
 
   getSettings = async (req, res, next) => {
     try {
-      const settings = await this.service.getSettings();
+      const settings = await this.service.getSettings(req.auth?.user?.tenantId);
       res.status(200).json(successResponse({
         message: 'Settings retrieved successfully',
         data: settings
@@ -27,7 +27,7 @@ export class SettingsController {
         userId: req.auth?.user?.id ?? null,
         ipAddress: getPersistedRequestIp(req)
       };
-      await this.service.saveSettings(payload, context);
+      await this.service.saveSettings(req.auth?.user?.tenantId, payload, context);
       res.status(200).json(successResponse({
         message: 'Settings saved successfully'
       }));
@@ -38,7 +38,7 @@ export class SettingsController {
 
   getPublicSettings = async (req, res, next) => {
     try {
-      const settings = await this.service.getPublicSettings();
+      const settings = await this.service.getPublicSettings(req.auth?.tenant?.id);
       res.status(200).json(successResponse({
         message: 'Public settings retrieved successfully',
         data: settings
@@ -55,7 +55,7 @@ export class SettingsController {
         userId: req.auth?.user?.id ?? null,
         ipAddress: getPersistedRequestIp(req)
       };
-      await this.service.updateLogoSetting(url, context);
+      await this.service.updateLogoSetting(req.auth?.user?.tenantId, url, context);
       res.status(200).json(successResponse({
         message: 'Logo uploaded and saved successfully',
         data: { url: toPublicFileUrl(url) }
@@ -73,7 +73,7 @@ export class SettingsController {
         userId,
         ipAddress: getPersistedRequestIp(req)
       };
-      await this.service.changePassword(userId, current_password, new_password, context);
+      await this.service.changePassword(req.auth?.user?.tenantId, userId, current_password, new_password, context);
       res.status(200).json(successResponse({
         message: 'Password updated successfully'
       }));

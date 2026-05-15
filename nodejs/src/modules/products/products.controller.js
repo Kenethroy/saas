@@ -11,6 +11,10 @@ export class ProductsController {
     return req.auth?.user?.tenantId ?? null;
   }
 
+  getBranchId(req) {
+    return req.auth?.branch?.id ?? null;
+  }
+
   brochurePdf = async (req, res, next) => {
     try {
       const { document, fileName } = await this.service.createBrochurePdfDocument(this.getTenantId(req));
@@ -27,7 +31,9 @@ export class ProductsController {
 
   list = async (req, res, next) => {
     try {
-      const result = await this.service.list(this.getTenantId(req), req.query);
+      const result = await this.service.list(this.getTenantId(req), req.query, {
+        branchId: this.getBranchId(req)
+      });
       res.status(200).json(
         successResponse({
           message: "Products retrieved successfully",
@@ -42,7 +48,9 @@ export class ProductsController {
 
   inventoryOverview = async (req, res, next) => {
     try {
-      const result = await this.service.listInventoryOverview(this.getTenantId(req), req.query);
+      const result = await this.service.listInventoryOverview(this.getTenantId(req), req.query, {
+        branchId: this.getBranchId(req)
+      });
       res.status(200).json(
         successResponse({
           message: "Inventory overview retrieved successfully",
@@ -57,7 +65,9 @@ export class ProductsController {
 
   getById = async (req, res, next) => {
     try {
-      const data = await this.service.getById(this.getTenantId(req), req.params.id);
+      const data = await this.service.getById(this.getTenantId(req), req.params.id, {
+        branchId: this.getBranchId(req)
+      });
       res.status(200).json(
         successResponse({
           message: "Product retrieved successfully",
@@ -71,7 +81,9 @@ export class ProductsController {
 
   listForSalesOrder = async (req, res, next) => {
     try {
-      const data = await this.service.listForSalesOrder(this.getTenantId(req), req.query);
+      const data = await this.service.listForSalesOrder(this.getTenantId(req), req.query, {
+        branchId: this.getBranchId(req)
+      });
       res.status(200).json(
         successResponse({
           message: "Product variants retrieved successfully",

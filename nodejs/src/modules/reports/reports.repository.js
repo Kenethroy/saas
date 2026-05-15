@@ -38,8 +38,9 @@ function toOrderMap(rows, idColumn, entityKey, entityIdColumn, entityNameColumn,
 }
 
 export class ReportsRepository {
-  async findSalesOrdersInRange(start, end) {
-    const rows = await query(`
+  async findSalesOrdersInRange(tenantId, start, end, { branchId = null } = {}) {
+    const params = [tenantId, start, end];
+    let sql = `
       SELECT
         so.id,
         so.customer_id,
@@ -52,32 +53,42 @@ export class ReportsRepository {
         p.name AS product_name,
         cat.name AS category_name
       FROM sales_orders so
-      JOIN customers c ON c.id = so.customer_id
-      LEFT JOIN sales_order_items soi ON soi.sales_order_id = so.id
-      LEFT JOIN products p ON p.id = soi.product_id
-      LEFT JOIN categories cat ON cat.id = p.category_id
-      WHERE so.delete_flg = 0
+      JOIN customers c ON c.id = so.customer_id AND c.tenant_id = so.tenant_id
+      LEFT JOIN sales_order_items soi ON soi.sales_order_id = so.id AND soi.tenant_id = so.tenant_id
+      LEFT JOIN products p ON p.id = soi.product_id AND p.tenant_id = so.tenant_id
+      LEFT JOIN categories cat ON cat.id = p.category_id AND cat.tenant_id = so.tenant_id
+      WHERE so.tenant_id = ?
+        AND so.delete_flg = 0
         AND so.status <> 'cancelled'
         AND so.order_date BETWEEN ? AND ?
-      ORDER BY so.id ASC, soi.id ASC
-    `, [start, end]);
+    `;
+
+    if (branchId) {
+      sql += " AND so.branch_id = ?";
+      params.push(Number(branchId));
+    }
+
+    sql += " ORDER BY so.id ASC, soi.id ASC";
+    const rows = await query(sql, params);
 
     return toOrderMap(rows, "id", "customer", "customer_id", "customer_name", "total_amount", "order_date");
   }
 
-  async countNewCustomersInRange(start, end) {
+  async countNewCustomersInRange(tenantId, start, end) {
     const rows = await query(`
       SELECT COUNT(*) AS total
       FROM customers
-      WHERE delete_flg = 0
+      WHERE tenant_id = ?
+        AND delete_flg = 0
         AND DATE(created_at) BETWEEN ? AND ?
-    `, [start, end]);
+    `, [tenantId, start, end]);
 
     return Number(rows[0]?.total ?? 0);
   }
 
-  async findPurchaseOrdersInRange(start, end) {
-    const rows = await query(`
+  async findPurchaseOrdersInRange(tenantId, start, end, { branchId = null } = {}) {
+    const params = [tenantId, start, end];
+    let sql = `
       SELECT
         po.id,
         po.supplier_id,
@@ -90,32 +101,42 @@ export class ReportsRepository {
         p.name AS product_name,
         cat.name AS category_name
       FROM purchase_orders po
-      JOIN suppliers s ON s.id = po.supplier_id
-      LEFT JOIN purchase_order_items poi ON poi.purchase_order_id = po.id
-      LEFT JOIN products p ON p.id = poi.product_id
-      LEFT JOIN categories cat ON cat.id = p.category_id
-      WHERE po.delete_flg = 0
+      JOIN suppliers s ON s.id = po.supplier_id AND s.tenant_id = po.tenant_id
+      LEFT JOIN purchase_order_items poi ON poi.purchase_order_id = po.id AND poi.tenant_id = po.tenant_id
+      LEFT JOIN products p ON p.id = poi.product_id AND p.tenant_id = po.tenant_id
+      LEFT JOIN categories cat ON cat.id = p.category_id AND cat.tenant_id = po.tenant_id
+      WHERE po.tenant_id = ?
+        AND po.delete_flg = 0
         AND po.status <> 'cancelled'
         AND po.order_date BETWEEN ? AND ?
-      ORDER BY po.id ASC, poi.id ASC
-    `, [start, end]);
+    `;
+
+    if (branchId) {
+      sql += " AND po.branch_id = ?";
+      params.push(Number(branchId));
+    }
+
+    sql += " ORDER BY po.id ASC, poi.id ASC";
+    const rows = await query(sql, params);
 
     return toOrderMap(rows, "id", "supplier", "supplier_id", "supplier_name", "total_amount", "order_date");
   }
 
-  async countNewSuppliersInRange(start, end) {
+  async countNewSuppliersInRange(tenantId, start, end) {
     const rows = await query(`
       SELECT COUNT(*) AS total
       FROM suppliers
-      WHERE delete_flg = 0
+      WHERE tenant_id = ?
+        AND delete_flg = 0
         AND DATE(created) BETWEEN ? AND ?
-    `, [start, end]);
+    `, [tenantId, start, end]);
 
     return Number(rows[0]?.total ?? 0);
   }
 
-  async findInvoicesInRange(start, end) {
-    const rows = await query(`
+  async findInvoicesInRange(tenantId, start, end, { branchId = null } = {}) {
+    const params = [tenantId, start, end];
+    let sql = `
       SELECT
         i.id,
         i.invoice_date,
@@ -123,12 +144,20 @@ export class ReportsRepository {
         ii.unit_cost,
         ii.line_total
       FROM invoices i
-      LEFT JOIN invoice_items ii ON ii.invoice_id = i.id
-      WHERE i.delete_flg = 0
+      LEFT JOIN invoice_items ii ON ii.invoice_id = i.id AND ii.tenant_id = i.tenant_id
+      WHERE i.tenant_id = ?
+        AND i.delete_flg = 0
         AND i.status IN ('issued', 'partial', 'paid')
         AND i.invoice_date BETWEEN ? AND ?
-      ORDER BY i.id ASC, ii.id ASC
-    `, [start, end]);
+    `;
+
+    if (branchId) {
+      sql += " AND i.branch_id = ?";
+      params.push(Number(branchId));
+    }
+
+    sql += " ORDER BY i.id ASC, ii.id ASC";
+    const rows = await query(sql, params);
 
     const map = new Map();
 
@@ -154,8 +183,9 @@ export class ReportsRepository {
     return Array.from(map.values());
   }
 
-  async findCustomerReturnsInRange(start, end) {
-    const rows = await query(`
+  async findCustomerReturnsInRange(tenantId, start, end, { branchId = null } = {}) {
+    const params = [tenantId, start, end];
+    let sql = `
       SELECT
         cr.id,
         cr.request_date,
@@ -164,13 +194,21 @@ export class ReportsRepository {
         cri.restock_flg,
         pv.unit_cost
       FROM customer_returns cr
-      LEFT JOIN customer_return_items cri ON cri.customer_return_id = cr.id
-      LEFT JOIN product_variants pv ON pv.id = cri.product_variant_id
-      WHERE cr.delete_flg = 0
+      LEFT JOIN customer_return_items cri ON cri.customer_return_id = cr.id AND cri.tenant_id = cr.tenant_id
+      LEFT JOIN product_variants pv ON pv.id = cri.product_variant_id AND pv.tenant_id = cr.tenant_id
+      WHERE cr.tenant_id = ?
+        AND cr.delete_flg = 0
         AND cr.status = 'completed'
         AND cr.request_date BETWEEN ? AND ?
-      ORDER BY cr.id ASC, cri.id ASC
-    `, [start, end]);
+    `;
+
+    if (branchId) {
+      sql += " AND cr.branch_id = ?";
+      params.push(Number(branchId));
+    }
+
+    sql += " ORDER BY cr.id ASC, cri.id ASC";
+    const rows = await query(sql, params);
 
     const map = new Map();
 
@@ -199,24 +237,34 @@ export class ReportsRepository {
     return Array.from(map.values());
   }
 
-  async findExpensesInRange(start, end) {
-    return query(`
+  async findExpensesInRange(tenantId, start, end, { branchId = null } = {}) {
+    const params = [tenantId, start, end];
+    let sql = `
       SELECT
         be.amount,
         ec.name AS category_name,
         parent.name AS parent_category_name
       FROM business_expenses be
-      JOIN expense_categories ec ON ec.id = be.category_id
-      LEFT JOIN expense_categories parent ON parent.id = ec.parent_id
-      WHERE be.delete_flg = 0
+      JOIN expense_categories ec ON ec.id = be.category_id AND ec.tenant_id = be.tenant_id
+      LEFT JOIN expense_categories parent ON parent.id = ec.parent_id AND parent.tenant_id = be.tenant_id
+      WHERE be.tenant_id = ?
+        AND be.delete_flg = 0
         AND be.status <> 'void'
         AND be.expense_date BETWEEN ? AND ?
-      ORDER BY be.expense_date ASC, be.id ASC
-    `, [start, end]);
+    `;
+
+    if (branchId) {
+      sql += " AND be.branch_id = ?";
+      params.push(Number(branchId));
+    }
+
+    sql += " ORDER BY be.expense_date ASC, be.id ASC";
+    return query(sql, params);
   }
 
-  async findLossAdjustmentsInRange(start, end) {
-    const rows = await query(`
+  async findLossAdjustmentsInRange(tenantId, start, end, { branchId = null } = {}) {
+    const params = [tenantId, start, end];
+    let sql = `
       SELECT
         ia.id,
         ia.reason,
@@ -224,13 +272,21 @@ export class ReportsRepository {
         iai.adjust_type,
         pv.unit_cost
       FROM inventory_adjustments ia
-      LEFT JOIN inventory_adjustment_items iai ON iai.inventory_adjustment_id = ia.id
-      LEFT JOIN product_variants pv ON pv.id = iai.product_variant_id
-      WHERE ia.delete_flg = 0
+      LEFT JOIN inventory_adjustment_items iai ON iai.inventory_adjustment_id = ia.id AND iai.tenant_id = ia.tenant_id
+      LEFT JOIN product_variants pv ON pv.id = iai.product_variant_id AND pv.tenant_id = ia.tenant_id
+      WHERE ia.tenant_id = ?
+        AND ia.delete_flg = 0
         AND ia.status = 'approved'
         AND DATE(ia.adjustment_date) BETWEEN ? AND ?
-      ORDER BY ia.id ASC, iai.id ASC
-    `, [start, end]);
+    `;
+
+    if (branchId) {
+      sql += " AND ia.branch_id = ?";
+      params.push(Number(branchId));
+    }
+
+    sql += " ORDER BY ia.id ASC, iai.id ASC";
+    const rows = await query(sql, params);
 
     const map = new Map();
 
@@ -258,9 +314,11 @@ export class ReportsRepository {
     return Array.from(map.values());
   }
 
-  async findInventoryVelocitySource(days) {
-    const [products, soldInPeriod, historicalSales] = await Promise.all([
-      query(`
+  async findInventoryVelocitySource(tenantId, days, { branchId = null } = {}) {
+    const productParams = branchId ? [Number(branchId), tenantId] : [tenantId];
+    const soldParams = [tenantId, days];
+    const historicalParams = [tenantId];
+    let productSql = `
         SELECT
           p.id,
           p.name,
@@ -268,33 +326,64 @@ export class ReportsRepository {
           p.created_at,
           COALESCE(SUM(COALESCE(pv.stock_quantity, 0)), 0) AS current_stock
         FROM products p
-        LEFT JOIN categories cat ON cat.id = p.category_id
-        LEFT JOIN product_variants pv ON pv.product_id = p.id AND pv.delete_flg = 0
-        WHERE p.delete_flg = 0
+        LEFT JOIN categories cat ON cat.id = p.category_id AND cat.tenant_id = p.tenant_id
+        LEFT JOIN product_variants pv ON pv.product_id = p.id AND pv.tenant_id = p.tenant_id AND pv.delete_flg = 0
+        WHERE p.tenant_id = ?
+          AND p.delete_flg = 0
         GROUP BY p.id, p.name, category, p.created_at
-      `),
+      `;
+
+    if (branchId) {
+      productSql = `
+        SELECT
+          p.id,
+          p.name,
+          COALESCE(cat.name, 'Uncategorized') AS category,
+          p.created_at,
+          COALESCE(SUM(COALESCE(bib.on_hand_qty, 0)), 0) AS current_stock
+        FROM products p
+        LEFT JOIN categories cat ON cat.id = p.category_id AND cat.tenant_id = p.tenant_id
+        LEFT JOIN product_variants pv ON pv.product_id = p.id AND pv.tenant_id = p.tenant_id AND pv.delete_flg = 0
+        LEFT JOIN branch_inventory_balances bib
+          ON bib.product_variant_id = pv.id
+         AND bib.tenant_id = pv.tenant_id
+         AND bib.branch_id = ?
+        WHERE p.tenant_id = ?
+          AND p.delete_flg = 0
+        GROUP BY p.id, p.name, category, p.created_at
+      `;
+      soldParams.push(Number(branchId));
+      historicalParams.push(Number(branchId));
+    }
+
+    const [products, soldInPeriod, historicalSales] = await Promise.all([
+      query(productSql, productParams),
       query(`
         SELECT
           soi.product_id,
           SUM(soi.quantity) AS quantity,
           SUM(soi.line_total) AS revenue
         FROM sales_order_items soi
-        JOIN sales_orders so ON so.id = soi.sales_order_id
-        WHERE so.delete_flg = 0
+        JOIN sales_orders so ON so.id = soi.sales_order_id AND so.tenant_id = soi.tenant_id
+        WHERE so.tenant_id = ?
+          AND so.delete_flg = 0
           AND so.status IN ('delivered', 'completed')
           AND so.order_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+          ${branchId ? "AND so.branch_id = ?" : ""}
         GROUP BY soi.product_id
-      `, [days]),
+      `, soldParams),
       query(`
         SELECT
           soi.product_id,
           MAX(so.order_date) AS last_sale_date
         FROM sales_order_items soi
-        JOIN sales_orders so ON so.id = soi.sales_order_id
-        WHERE so.delete_flg = 0
+        JOIN sales_orders so ON so.id = soi.sales_order_id AND so.tenant_id = soi.tenant_id
+        WHERE so.tenant_id = ?
+          AND so.delete_flg = 0
           AND so.status IN ('delivered', 'completed')
+          ${branchId ? "AND so.branch_id = ?" : ""}
         GROUP BY soi.product_id
-      `)
+      `, historicalParams)
     ]);
 
     return {

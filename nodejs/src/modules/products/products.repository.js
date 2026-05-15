@@ -1,7 +1,8 @@
 import { query, transaction } from "#shared/database/mysql";
+import { getBranchInventoryQuantities } from "#shared/utils/branch-inventory";
 
 export class ProductsRepository {
-  async findPaginated(tenantId, filters = {}, pagination = {}) {
+  async findPaginated(tenantId, filters = {}, pagination = {}, options = {}) {
     const page = pagination.page ?? 1;
     const perPage = pagination.perPage ?? 10;
     const offset = (page - 1) * perPage;
@@ -63,12 +64,13 @@ export class ProductsRepository {
       [tenantId, productIds]
     );
 
-    const formattedData = products.map(p => this._mapProduct(p, variants.filter(v => v.product_id === p.id)));
+    const branchAwareVariants = await this._applyBranchStockQuantities(tenantId, variants, options.branchId ?? null);
+    const formattedData = products.map(p => this._mapProduct(p, branchAwareVariants.filter(v => v.product_id === p.id)));
 
     return { data: formattedData, total: countRows[0].total };
   }
 
-  async findById(tenantId, id) {
+  async findById(tenantId, id, options = {}) {
     const sql = `
       SELECT p.*, c.name as cat_name, c.status as cat_status
       FROM products p
@@ -84,7 +86,8 @@ export class ProductsRepository {
       [tenantId, id]
     );
 
-    return this._mapProduct(rows[0], variants);
+    const branchAwareVariants = await this._applyBranchStockQuantities(tenantId, variants, options.branchId ?? null);
+    return this._mapProduct(rows[0], branchAwareVariants);
   }
 
   async findCategoryById(tenantId, id) {
@@ -168,7 +171,7 @@ export class ProductsRepository {
     return rows[0].count;
   }
 
-  async findVariantById(tenantId, id) {
+  async findVariantById(tenantId, id, options = {}) {
     const sql = `
       SELECT pv.*, p.name as p_name, p.category_id, c.name as cat_name
       FROM product_variants pv
@@ -180,7 +183,7 @@ export class ProductsRepository {
     const rows = await query(sql, [tenantId, id]);
     if (!rows[0]) return null;
 
-    const row = rows[0];
+    const [row] = await this._applyBranchStockQuantities(tenantId, [rows[0]], options.branchId ?? null);
     return {
       ...row,
       productId: row.product_id,
@@ -200,7 +203,7 @@ export class ProductsRepository {
 
   async listOrderableVariants(tenantId, filters = {}) {
     const includeOutOfStock = filters.context === "purchase_order";
-    let sql = `
+    const sql = `
       SELECT pv.*, p.name as p_name, p.category_id, c.name as cat_name
       FROM product_variants pv
       JOIN products p ON pv.product_id = p.id AND p.tenant_id = pv.tenant_id
@@ -209,26 +212,28 @@ export class ProductsRepository {
         AND p.delete_flg = 0 AND p.status = 1
     `;
     const params = [tenantId];
-
-    if (!includeOutOfStock) {
-      sql += " AND pv.stock_quantity > 0";
-    }
+    let nextSql = sql;
 
     if (typeof filters.categoryId === "number") {
-      sql += " AND p.category_id = ?";
+      nextSql += " AND p.category_id = ?";
       params.push(filters.categoryId);
     }
 
     if (filters.search) {
-      sql += " AND (pv.name LIKE ? OR p.name LIKE ?)";
+      nextSql += " AND (pv.name LIKE ? OR p.name LIKE ?)";
       const searchPattern = `%${filters.search}%`;
       params.push(searchPattern, searchPattern);
     }
 
-    sql += " ORDER BY p.name ASC, pv.name ASC";
+    nextSql += " ORDER BY p.name ASC, pv.name ASC";
 
-    const rows = await query(sql, params);
-    return rows.map(row => ({
+    const rows = await query(nextSql, params);
+    const branchAwareRows = await this._applyBranchStockQuantities(tenantId, rows, filters.branchId ?? null);
+    const filteredRows = includeOutOfStock
+      ? branchAwareRows
+      : branchAwareRows.filter((row) => Number(row.stock_quantity ?? 0) > 0);
+
+    return filteredRows.map(row => ({
       ...row,
       unitCost: row.unit_cost,
       unitPrice: row.unit_price,
@@ -269,7 +274,8 @@ export class ProductsRepository {
     sql += " ORDER BY p.name ASC, pv.name ASC";
 
     const rows = await query(sql, params);
-    return rows.map(row => ({
+    const branchAwareRows = await this._applyBranchStockQuantities(tenantId, rows, filters.branchId ?? null);
+    return branchAwareRows.map(row => ({
       ...row,
       unitCost: row.unit_cost,
       unitPrice: row.unit_price,
@@ -300,6 +306,11 @@ export class ProductsRepository {
         AND so.delete_flg = 0
         AND so.status = 'processing'
     `;
+
+    if (options.branchId) {
+      sql += " AND so.branch_id = ?";
+      params.push(Number(options.branchId));
+    }
 
     if (options.excludeSalesOrderId) {
       sql += " AND soi.sales_order_id <> ?";
@@ -449,5 +460,24 @@ export class ProductsRepository {
         updatedAt: v.updated_at
       }))
     };
+  }
+
+  async _applyBranchStockQuantities(tenantId, variants = [], branchId = null) {
+    if (!branchId || variants.length === 0) {
+      return variants;
+    }
+
+    const { quantities } = await getBranchInventoryQuantities({
+      tenantId,
+      branchId,
+      variantIds: variants.map((variant) => Number(variant.id))
+    });
+
+    return variants.map((variant) => ({
+      ...variant,
+      stock_quantity: quantities.has(Number(variant.id))
+        ? Number(quantities.get(Number(variant.id)))
+        : 0
+    }));
   }
 }

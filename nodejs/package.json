@@ -20,6 +20,7 @@
     "install:chrome": "npx puppeteer browsers install chrome",
     "migrate": "node scripts/migrate.js",
     "migrate:v2": "node scripts/migrate-v2.js",
+    "create:platform-admin": "node scripts/create-platform-admin.js",
     "test": "vitest run"
   },
   "dependencies": {

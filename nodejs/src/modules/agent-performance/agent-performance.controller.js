@@ -7,7 +7,7 @@ export class AgentPerformanceController {
 
   sales = async (req, res, next) => {
     try {
-      const data = await this.service.getSales(req.query);
+      const data = await this.service.getSales(req.auth?.user?.tenantId, req.query);
       res.status(200).json({
         success: true,
         data
@@ -19,7 +19,7 @@ export class AgentPerformanceController {
 
   salesTrend = async (req, res, next) => {
     try {
-      const data = await this.service.getSalesTrend(req.query);
+      const data = await this.service.getSalesTrend(req.auth?.user?.tenantId, req.query);
       res.status(200).json({
         success: true,
         data
@@ -31,7 +31,7 @@ export class AgentPerformanceController {
 
   collections = async (req, res, next) => {
     try {
-      const data = await this.service.getCollections(req.query);
+      const data = await this.service.getCollections(req.auth?.user?.tenantId, req.query);
       res.status(200).json({
         success: true,
         data
@@ -43,7 +43,7 @@ export class AgentPerformanceController {
 
   collectionsTrend = async (req, res, next) => {
     try {
-      const data = await this.service.getCollectionsTrend(req.query);
+      const data = await this.service.getCollectionsTrend(req.auth?.user?.tenantId, req.query);
       res.status(200).json({
         success: true,
         data
@@ -55,7 +55,7 @@ export class AgentPerformanceController {
 
   profile = async (req, res, next) => {
     try {
-      const data = await this.service.getAgentProfile(req.params.id);
+      const data = await this.service.getAgentProfile(req.auth?.user?.tenantId, req.params.id);
       res.status(200).json({
         success: true,
         data
@@ -67,7 +67,7 @@ export class AgentPerformanceController {
 
   salesHistory = async (req, res, next) => {
     try {
-      const data = await this.service.getAgentSalesHistory(req.params.id, req.query);
+      const data = await this.service.getAgentSalesHistory(req.auth?.user?.tenantId, req.params.id, req.query);
       res.status(200).json({
         success: true,
         data
@@ -79,7 +79,7 @@ export class AgentPerformanceController {
 
   collectionHistory = async (req, res, next) => {
     try {
-      const data = await this.service.getAgentCollectionHistory(req.params.id, req.query);
+      const data = await this.service.getAgentCollectionHistory(req.auth?.user?.tenantId, req.params.id, req.query);
       res.status(200).json({
         success: true,
         data
@@ -91,7 +91,7 @@ export class AgentPerformanceController {
 
   remittanceLedger = async (req, res, next) => {
     try {
-      const data = await this.service.getAgentRemittanceLedger(req.params.id, req.query);
+      const data = await this.service.getAgentRemittanceLedger(req.auth?.user?.tenantId, req.params.id, req.query);
       res.status(200).json({
         success: true,
         data
@@ -103,7 +103,7 @@ export class AgentPerformanceController {
 
   collectionQueue = async (req, res, next) => {
     try {
-      const data = await this.service.getCollectionQueue(req.query);
+      const data = await this.service.getCollectionQueue(req.auth?.user?.tenantId, req.query);
       res.status(200).json({
         success: true,
         data
@@ -115,7 +115,7 @@ export class AgentPerformanceController {
 
   remittanceReview = async (req, res, next) => {
     try {
-      const data = await this.service.getRemittanceReview(req.query);
+      const data = await this.service.getRemittanceReview(req.auth?.user?.tenantId, req.query);
       res.status(200).json({
         success: true,
         data

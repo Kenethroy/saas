@@ -17,7 +17,9 @@ export class DeliveriesController {
 
   list = async (req, res, next) => {
     try {
-      const result = await this.service.list(this.getTenantId(req), req.query);
+      const result = await this.service.list(this.getTenantId(req), req.query, {
+        branchId: this.getBranchId(req)
+      });
       res.status(200).json(successResponse({
         message: "Deliveries retrieved successfully",
         data: result.data,
@@ -30,7 +32,9 @@ export class DeliveriesController {
 
   selectionOptions = async (req, res, next) => {
     try {
-      const data = await this.service.getSelectionOptions(this.getTenantId(req));
+      const data = await this.service.getSelectionOptions(this.getTenantId(req), {
+        branchId: this.getBranchId(req)
+      });
       res.status(200).json(successResponse({
         message: "Delivery selection data retrieved successfully",
         data

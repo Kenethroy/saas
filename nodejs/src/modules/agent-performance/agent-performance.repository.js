@@ -1,13 +1,13 @@
 import { query } from "#shared/database/mysql";
 
 export class AgentPerformanceRepository {
-  async findAgentProfile(agentId) {
+  async findAgentProfile(tenantId, agentId) {
     const rows = await query(`
       SELECT id, first_name, last_name, position, phone, email, status, date_hired
       FROM employees
-      WHERE id = ? AND delete_flg = 0
+      WHERE tenant_id = ? AND id = ? AND delete_flg = 0
       LIMIT 1
-    `, [agentId]);
+    `, [tenantId, agentId]);
 
     if (!rows[0]) {
       return null;
@@ -26,7 +26,7 @@ export class AgentPerformanceRepository {
     };
   }
 
-  async findReceivablesInRange({ start, end, search }) {
+  async findReceivablesInRange(tenantId, { start, end, search }) {
     let sql = `
       SELECT
         ar.id,
@@ -42,16 +42,17 @@ export class AgentPerformanceRepository {
         c.name AS customer_name,
         i.invoice_number
       FROM accounts_receivable ar
-      JOIN employees e ON ar.agent_id = e.id
-      JOIN customers c ON ar.customer_id = c.id
-      LEFT JOIN invoices i ON ar.invoice_id = i.id
-      WHERE ar.delete_flg = 0
+      JOIN employees e ON ar.agent_id = e.id AND e.tenant_id = ar.tenant_id
+      JOIN customers c ON ar.customer_id = c.id AND c.tenant_id = ar.tenant_id
+      LEFT JOIN invoices i ON ar.invoice_id = i.id AND i.tenant_id = ar.tenant_id
+      WHERE ar.tenant_id = ?
+        AND ar.delete_flg = 0
         AND ar.is_opening_balance = 0
         AND ar.agent_id IS NOT NULL
         AND DATE(ar.invoice_date) BETWEEN ? AND ?
         AND (i.id IS NULL OR (i.delete_flg = 0 AND i.status <> 'cancelled'))
     `;
-    const params = [start, end];
+    const params = [tenantId, start, end];
 
     if (search) {
       sql += " AND (e.first_name LIKE ? OR e.last_name LIKE ? OR CONCAT(e.first_name, ' ', e.last_name) LIKE ?)";
@@ -88,16 +89,17 @@ export class AgentPerformanceRepository {
     }));
   }
 
-  async findAgentSalesHistory(agentId, { page, limit, search, status }) {
+  async findAgentSalesHistory(tenantId, agentId, { page, limit, search, status }) {
     const offset = (page - 1) * limit;
     let baseSql = `
       FROM sales_orders so
-      JOIN customers c ON so.customer_id = c.id
-      LEFT JOIN invoices i ON so.id = i.sales_order_id
-      WHERE so.delete_flg = 0
+      JOIN customers c ON so.customer_id = c.id AND c.tenant_id = so.tenant_id
+      LEFT JOIN invoices i ON so.id = i.sales_order_id AND i.tenant_id = so.tenant_id
+      WHERE so.tenant_id = ?
+        AND so.delete_flg = 0
         AND so.agent_id = ?
     `;
-    const params = [agentId];
+    const params = [tenantId, agentId];
 
     if (search) {
       baseSql += " AND (so.sales_order_number LIKE ? OR c.name LIKE ?)";
@@ -115,7 +117,7 @@ export class AgentPerformanceRepository {
         SELECT so.id, so.sales_order_number, so.order_date, so.status, so.total_amount,
                c.id AS customer_id, c.name AS customer_name,
                i.id AS invoice_id, i.invoice_number, i.status AS invoice_status,
-               (SELECT COUNT(*) FROM sales_order_items soi WHERE soi.sales_order_id = so.id) AS item_count
+               (SELECT COUNT(*) FROM sales_order_items soi WHERE soi.tenant_id = so.tenant_id AND soi.sales_order_id = so.id) AS item_count
         ${baseSql}
         ORDER BY so.order_date DESC, so.id DESC
         LIMIT ? OFFSET ?
@@ -168,19 +170,20 @@ export class AgentPerformanceRepository {
     };
   }
 
-  async findAgentCollectionHistory(agentId, { page, limit, search }) {
+  async findAgentCollectionHistory(tenantId, agentId, { page, limit, search }) {
     const offset = (page - 1) * limit;
     let baseSql = `
       FROM payment_allocations pa
-      JOIN payments p ON pa.payment_id = p.id
-      JOIN accounts_receivable ar ON pa.accounts_receivable_id = ar.id
-      JOIN customers c ON ar.customer_id = c.id
-      LEFT JOIN invoices i ON ar.invoice_id = i.id
-      LEFT JOIN sales_orders so ON i.sales_order_id = so.id
-      WHERE ar.agent_id = ?
+      JOIN payments p ON pa.payment_id = p.id AND p.tenant_id = pa.tenant_id
+      JOIN accounts_receivable ar ON pa.accounts_receivable_id = ar.id AND ar.tenant_id = pa.tenant_id
+      JOIN customers c ON ar.customer_id = c.id AND c.tenant_id = ar.tenant_id
+      LEFT JOIN invoices i ON ar.invoice_id = i.id AND i.tenant_id = ar.tenant_id
+      LEFT JOIN sales_orders so ON i.sales_order_id = so.id AND so.tenant_id = i.tenant_id
+      WHERE ar.tenant_id = ?
+        AND ar.agent_id = ?
         AND ar.delete_flg = 0
     `;
-    const params = [agentId];
+    const params = [tenantId, agentId];
 
     if (search) {
       baseSql += " AND (p.payment_number LIKE ? OR p.reference_number LIKE ? OR c.name LIKE ? OR i.invoice_number LIKE ? OR so.sales_order_number LIKE ?)";
@@ -247,16 +250,17 @@ export class AgentPerformanceRepository {
     };
   }
 
-  async findAgentRemittanceAllocations(agentId, { search }) {
+  async findAgentRemittanceAllocations(tenantId, agentId, { search }) {
     let baseSql = `
       FROM payment_allocations pa
-      JOIN payments p ON pa.payment_id = p.id
-      JOIN accounts_receivable ar ON pa.accounts_receivable_id = ar.id
-      JOIN customers c ON ar.customer_id = c.id
-      WHERE ar.agent_id = ?
+      JOIN payments p ON pa.payment_id = p.id AND p.tenant_id = pa.tenant_id
+      JOIN accounts_receivable ar ON pa.accounts_receivable_id = ar.id AND ar.tenant_id = pa.tenant_id
+      JOIN customers c ON ar.customer_id = c.id AND c.tenant_id = ar.tenant_id
+      WHERE ar.tenant_id = ?
+        AND ar.agent_id = ?
         AND ar.delete_flg = 0
     `;
-    const params = [agentId];
+    const params = [tenantId, agentId];
 
     if (search) {
       baseSql += " AND (p.payment_number LIKE ? OR p.reference_number LIKE ? OR c.name LIKE ?)";
@@ -291,7 +295,7 @@ export class AgentPerformanceRepository {
     }));
   }
 
-  async findCollectionQueueRecords({ search, agentId }) {
+  async findCollectionQueueRecords(tenantId, { search, agentId }) {
     let sql = `
       SELECT
         ar.id,
@@ -314,20 +318,21 @@ export class AgentPerformanceRepository {
         (
           SELECT MAX(p.payment_date)
           FROM payment_allocations pa
-          JOIN payments p ON pa.payment_id = p.id
-          WHERE pa.accounts_receivable_id = ar.id
+          JOIN payments p ON pa.payment_id = p.id AND p.tenant_id = pa.tenant_id
+          WHERE pa.tenant_id = ar.tenant_id AND pa.accounts_receivable_id = ar.id
         ) AS last_payment_date
       FROM accounts_receivable ar
-      JOIN customers c ON ar.customer_id = c.id
-      JOIN employees e ON ar.agent_id = e.id
-      LEFT JOIN invoices i ON ar.invoice_id = i.id
-      LEFT JOIN sales_orders so ON i.sales_order_id = so.id
-      WHERE ar.delete_flg = 0
+      JOIN customers c ON ar.customer_id = c.id AND c.tenant_id = ar.tenant_id
+      JOIN employees e ON ar.agent_id = e.id AND e.tenant_id = ar.tenant_id
+      LEFT JOIN invoices i ON ar.invoice_id = i.id AND i.tenant_id = ar.tenant_id
+      LEFT JOIN sales_orders so ON i.sales_order_id = so.id AND so.tenant_id = i.tenant_id
+      WHERE ar.tenant_id = ?
+        AND ar.delete_flg = 0
         AND ar.status IN ('unpaid', 'partial')
         AND ar.outstanding_amount > 0
         AND ar.agent_id IS NOT NULL
     `;
-    const params = [];
+    const params = [tenantId];
 
     if (agentId) {
       sql += " AND ar.agent_id = ?";
@@ -376,17 +381,18 @@ export class AgentPerformanceRepository {
     }));
   }
 
-  async findRemittanceReviewAllocations({ search }) {
+  async findRemittanceReviewAllocations(tenantId, { search }) {
     let baseSql = `
       FROM payment_allocations pa
-      JOIN payments p ON pa.payment_id = p.id
-      JOIN accounts_receivable ar ON pa.accounts_receivable_id = ar.id
-      JOIN customers c ON ar.customer_id = c.id
-      JOIN employees e ON ar.agent_id = e.id
-      WHERE ar.agent_id IS NOT NULL
+      JOIN payments p ON pa.payment_id = p.id AND p.tenant_id = pa.tenant_id
+      JOIN accounts_receivable ar ON pa.accounts_receivable_id = ar.id AND ar.tenant_id = pa.tenant_id
+      JOIN customers c ON ar.customer_id = c.id AND c.tenant_id = ar.tenant_id
+      JOIN employees e ON ar.agent_id = e.id AND e.tenant_id = ar.tenant_id
+      WHERE ar.tenant_id = ?
+        AND ar.agent_id IS NOT NULL
         AND ar.delete_flg = 0
     `;
-    const params = [];
+    const params = [tenantId];
 
     if (search) {
       baseSql += " AND (e.first_name LIKE ? OR e.last_name LIKE ? OR p.payment_number LIKE ? OR c.name LIKE ?)";

@@ -55,13 +55,13 @@ function scoreCustomer(row, normalizedQuestion, tokens) {
 }
 
 export class AssistantRepository {
-  async findCustomerMatches(question, limit = 5) {
+  async findCustomerMatches(tenantId, question, limit = 5) {
     const tokens = tokenizeQuestion(question);
     if (tokens.length === 0) return [];
 
-    let sql = "SELECT id, name, company, status FROM customers WHERE delete_flg = 0 AND (";
+    let sql = "SELECT id, name, company, status FROM customers WHERE tenant_id = ? AND delete_flg = 0 AND (";
     const conditions = [];
-    const params = [];
+    const params = [tenantId];
 
     for (const token of tokens) {
       conditions.push("name LIKE ? OR company LIKE ?");
@@ -89,22 +89,23 @@ export class AssistantRepository {
       .slice(0, limit);
   }
 
-  async listOverdueCustomers(limit = 5, referenceDate = new Date()) {
+  async listOverdueCustomers(tenantId, limit = 5, referenceDate = new Date()) {
     const sql = `
       SELECT ar.id, ar.due_date, ar.outstanding_amount, 
              c.id AS customer_id, c.name, c.company,
              inv.invoice_number
       FROM accounts_receivable ar
-      LEFT JOIN customers c ON ar.customer_id = c.id
-      LEFT JOIN invoices inv ON ar.invoice_id = inv.id
-      WHERE ar.delete_flg = 0 
+      LEFT JOIN customers c ON ar.customer_id = c.id AND c.tenant_id = ar.tenant_id
+      LEFT JOIN invoices inv ON ar.invoice_id = inv.id AND inv.tenant_id = ar.tenant_id
+      WHERE ar.tenant_id = ?
+        AND ar.delete_flg = 0 
         AND ar.status IN ('unpaid', 'partial')
         AND ar.due_date < ?
       ORDER BY ar.due_date ASC, ar.id ASC
       LIMIT 250
     `;
     
-    const rows = await query(sql, [referenceDate]);
+    const rows = await query(sql, [tenantId, referenceDate]);
     const grouped = new Map();
 
     for (const row of rows) {
@@ -143,21 +144,22 @@ export class AssistantRepository {
       .slice(0, limit);
   }
 
-  async listOutstandingCustomers(limit = 5) {
+  async listOutstandingCustomers(tenantId, limit = 5) {
     const sql = `
       SELECT ar.id, ar.due_date, ar.outstanding_amount, 
              c.id AS customer_id, c.name, c.company,
              inv.invoice_number
       FROM accounts_receivable ar
-      LEFT JOIN customers c ON ar.customer_id = c.id
-      LEFT JOIN invoices inv ON ar.invoice_id = inv.id
-      WHERE ar.delete_flg = 0 
+      LEFT JOIN customers c ON ar.customer_id = c.id AND c.tenant_id = ar.tenant_id
+      LEFT JOIN invoices inv ON ar.invoice_id = inv.id AND inv.tenant_id = ar.tenant_id
+      WHERE ar.tenant_id = ?
+        AND ar.delete_flg = 0 
         AND ar.status IN ('unpaid', 'partial')
       ORDER BY ar.due_date ASC, ar.id ASC
       LIMIT 250
     `;
     
-    const rows = await query(sql);
+    const rows = await query(sql, [tenantId]);
     const grouped = new Map();
 
     for (const row of rows) {
@@ -199,11 +201,12 @@ export class AssistantRepository {
   async createQueryLog(data) {
     const sql = `
       INSERT INTO assistant_queries (
-        user_id, question, answer, mode, confidence, intent, status,
+        tenant_id, user_id, question, answer, mode, confidence, intent, status,
         provider, model, context, sources, error_message, ip_address, user_agent
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
     return query(sql, [
+      data.tenantId,
       data.userId || null, data.question, data.answer || null, data.mode,
       data.confidence || null, data.intent || null, data.status || 'success',
       data.provider || null, data.model || null,
@@ -213,25 +216,25 @@ export class AssistantRepository {
     ]);
   }
 
-  async listIndexableCustomers(limit = null) {
-    let sql = "SELECT id, name, company, updated_at FROM customers WHERE delete_flg = 0 ORDER BY id ASC";
+  async listIndexableCustomers(tenantId, limit = null) {
+    let sql = "SELECT id, name, company, updated_at FROM customers WHERE tenant_id = ? AND delete_flg = 0 ORDER BY id ASC";
     if (limit) sql += ` LIMIT ${Number(limit)}`;
-    return query(sql);
+    return query(sql, [tenantId]);
   }
 
-  async listIndexableProducts(limit = null) {
-    let sql = "SELECT id, name, updated_at FROM products WHERE delete_flg = 0 ORDER BY id ASC";
+  async listIndexableProducts(tenantId, limit = null) {
+    let sql = "SELECT id, name, updated_at FROM products WHERE tenant_id = ? AND delete_flg = 0 ORDER BY id ASC";
     if (limit) sql += ` LIMIT ${Number(limit)}`;
-    return query(sql);
+    return query(sql, [tenantId]);
   }
 
-  async listIndexableSuppliers(limit = null) {
-    let sql = "SELECT id, name, modified as updated_at FROM suppliers WHERE delete_flg = 0 ORDER BY id ASC";
+  async listIndexableSuppliers(tenantId, limit = null) {
+    let sql = "SELECT id, name, modified as updated_at FROM suppliers WHERE tenant_id = ? AND delete_flg = 0 ORDER BY id ASC";
     if (limit) sql += ` LIMIT ${Number(limit)}`;
-    return query(sql);
+    return query(sql, [tenantId]);
   }
 
-  async fetchTopProducts(limit = 5) {
+  async fetchTopProducts(tenantId, limit = 5) {
     const sql = `
       SELECT 
         soi.product_id, 
@@ -242,15 +245,15 @@ export class AssistantRepository {
         SUM(soi.line_total) as total_revenue,
         COUNT(DISTINCT soi.sales_order_id) as order_count
       FROM sales_order_items soi
-      JOIN products p ON soi.product_id = p.id
-      LEFT JOIN categories c ON p.category_id = c.id
-      JOIN sales_orders so ON soi.sales_order_id = so.id
-      WHERE p.delete_flg = 0 AND so.delete_flg = 0 AND so.status <> 'cancelled'
+      JOIN products p ON soi.product_id = p.id AND p.tenant_id = soi.tenant_id
+      LEFT JOIN categories c ON p.category_id = c.id AND c.tenant_id = p.tenant_id
+      JOIN sales_orders so ON soi.sales_order_id = so.id AND so.tenant_id = soi.tenant_id
+      WHERE soi.tenant_id = ? AND p.delete_flg = 0 AND so.delete_flg = 0 AND so.status <> 'cancelled'
       GROUP BY soi.product_id, soi.product_name, p.category_id, c.name
       ORDER BY total_quantity DESC
       LIMIT ?
     `;
-    const rows = await query(sql, [limit]);
+    const rows = await query(sql, [tenantId, limit]);
     return rows.map(r => ({
       productId: Number(r.product_id),
       productName: r.product_name,
@@ -262,7 +265,7 @@ export class AssistantRepository {
     }));
   }
 
-  async fetchTopSuppliers(limit = 5) {
+  async fetchTopSuppliers(tenantId, limit = 5) {
     const sql = `
       SELECT 
         s.id as supplier_id,
@@ -272,13 +275,13 @@ export class AssistantRepository {
         COUNT(po.id) as order_count,
         MAX(po.order_date) as last_order_date
       FROM suppliers s
-      JOIN purchase_orders po ON s.id = po.supplier_id
-      WHERE s.delete_flg = 0 AND po.delete_flg = 0 AND po.status <> 'cancelled'
+      JOIN purchase_orders po ON s.id = po.supplier_id AND po.tenant_id = s.tenant_id
+      WHERE s.tenant_id = ? AND s.delete_flg = 0 AND po.delete_flg = 0 AND po.status <> 'cancelled'
       GROUP BY s.id, s.name, s.company_name
       ORDER BY total_spent DESC
       LIMIT ?
     `;
-    const rows = await query(sql, [limit]);
+    const rows = await query(sql, [tenantId, limit]);
     return rows.map(r => ({
       supplierId: Number(r.supplier_id),
       name: r.name,
@@ -289,10 +292,10 @@ export class AssistantRepository {
     }));
   }
 
-  async upsertIndexDocument({ documentKey, sourceType, module, entityType, entityId = null, title, content, metadata = null, chunks = [] }) {
+  async upsertIndexDocument({ tenantId, documentKey, sourceType, module, entityType, entityId = null, title, content, metadata = null, chunks = [] }) {
     const { transaction } = await import("#shared/database/mysql");
     return transaction(async (tx) => {
-      const [existingRows] = await tx.query("SELECT id FROM assistant_index_documents WHERE document_key = ? LIMIT 1", [documentKey]);
+      const [existingRows] = await tx.query("SELECT id FROM assistant_index_documents WHERE tenant_id = ? AND document_key = ? LIMIT 1", [tenantId, documentKey]);
       const existingId = existingRows[0]?.id;
 
       let docId;
@@ -302,27 +305,27 @@ export class AssistantRepository {
           UPDATE assistant_index_documents 
           SET source_type = ?, module = ?, entity_type = ?, entity_id = ?, 
               title = ?, content = ?, metadata = ?, last_indexed_at = NOW()
-          WHERE id = ?
-        `, [sourceType, module, entityType, entityId, title, content, metadata ? JSON.stringify(metadata) : null, docId]);
+          WHERE tenant_id = ? AND id = ?
+        `, [sourceType, module, entityType, entityId, title, content, metadata ? JSON.stringify(metadata) : null, tenantId, docId]);
         
-        await tx.query("DELETE FROM assistant_index_chunks WHERE document_id = ?", [docId]);
+        await tx.query("DELETE FROM assistant_index_chunks WHERE tenant_id = ? AND document_id = ?", [tenantId, docId]);
       } else {
         const [result] = await tx.query(`
           INSERT INTO assistant_index_documents (
-            document_key, source_type, module, entity_type, entity_id, title, content, metadata, last_indexed_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())
-        `, [documentKey, sourceType, module, entityType, entityId, title, content, metadata ? JSON.stringify(metadata) : null]);
+            tenant_id, document_key, source_type, module, entity_type, entity_id, title, content, metadata, last_indexed_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+        `, [tenantId, documentKey, sourceType, module, entityType, entityId, title, content, metadata ? JSON.stringify(metadata) : null]);
         docId = result.insertId;
       }
 
       if (chunks.length > 0) {
         const chunkSql = `
           INSERT INTO assistant_index_chunks (
-            document_id, chunk_index, content, keywords, embedding, metadata
+            tenant_id, document_id, chunk_index, content, keywords, embedding, metadata
           ) VALUES ?
         `;
         const chunkValues = chunks.map(chunk => [
-          docId, chunk.chunkIndex, chunk.content, chunk.keywords || null,
+          tenantId, docId, chunk.chunkIndex, chunk.content, chunk.keywords || null,
           chunk.embedding ? JSON.stringify(chunk.embedding) : null,
           chunk.metadata ? JSON.stringify(chunk.metadata) : null
         ]);
@@ -333,15 +336,15 @@ export class AssistantRepository {
     });
   }
 
-  async fetchRelevantChunks({ module = null, entityType = null, entityId = null, tokens = [], limit = 120 }) {
+  async fetchRelevantChunks({ tenantId, module = null, entityType = null, entityId = null, tokens = [], limit = 120 }) {
     let sql = `
       SELECT c.*, 
              d.module, d.entity_type, d.entity_id, d.title, d.document_key, d.metadata as doc_metadata, d.last_indexed_at
       FROM assistant_index_chunks c
-      JOIN assistant_index_documents d ON c.document_id = d.id
-      WHERE 1=1
+      JOIN assistant_index_documents d ON c.document_id = d.id AND d.tenant_id = c.tenant_id
+      WHERE d.tenant_id = ? AND c.tenant_id = ?
     `;
-    const params = [];
+    const params = [tenantId, tenantId];
 
     if (module) {
       sql += " AND d.module = ?";
@@ -387,10 +390,10 @@ export class AssistantRepository {
     }));
   }
 
-  async getIndexStats() {
+  async getIndexStats(tenantId) {
     const [docCount, chunkCount] = await Promise.all([
-      query("SELECT COUNT(*) as count FROM assistant_index_documents"),
-      query("SELECT COUNT(*) as count FROM assistant_index_chunks")
+      query("SELECT COUNT(*) as count FROM assistant_index_documents WHERE tenant_id = ?", [tenantId]),
+      query("SELECT COUNT(*) as count FROM assistant_index_chunks WHERE tenant_id = ?", [tenantId])
     ]);
 
     return {

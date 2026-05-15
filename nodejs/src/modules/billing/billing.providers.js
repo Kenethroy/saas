@@ -158,6 +158,46 @@ export class StripeBillingProvider {
     };
   }
 
+  async getCheckoutSession(paymentSessionId) {
+    if (!paymentSessionId) {
+      throw new AppError("Stripe checkout session id is required", 422);
+    }
+
+    if (!this.config.STRIPE_SECRET_KEY) {
+      throw new AppError("Stripe checkout confirmation requires a configured secret key", 422);
+    }
+
+    const response = await fetch(`https://api.stripe.com/v1/checkout/sessions/${encodeURIComponent(paymentSessionId)}`, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${this.config.STRIPE_SECRET_KEY}`
+      },
+      signal: AbortSignal.timeout(this.config.BILLING_PROVIDER_TIMEOUT_MS)
+    });
+
+    const rawText = await response.text();
+    const raw = rawText ? JSON.parse(rawText) : null;
+
+    if (!response.ok) {
+      throw new AppError(raw?.error?.message || "Stripe checkout session retrieval failed", 502, raw);
+    }
+
+    return {
+      provider: "stripe",
+      paymentSessionId: raw?.id ?? paymentSessionId,
+      referenceId: raw?.client_reference_id ?? null,
+      status: raw?.status ?? null,
+      paymentStatus: raw?.payment_status ?? null,
+      customerId: raw?.customer ?? null,
+      subscriptionId: raw?.subscription ?? null,
+      amount: raw?.amount_total === undefined || raw?.amount_total === null
+        ? null
+        : Number(raw.amount_total) / 100,
+      currency: raw?.currency ? String(raw.currency).toUpperCase() : null,
+      raw
+    };
+  }
+
   createMockCheckoutSession(payload) {
     const paymentSessionId = `cs_test_mock_${Date.now()}`;
     const mode = payload.planPrice.checkoutMode === "payment" ? "payment" : "subscription";
@@ -264,6 +304,10 @@ export class XenditBillingProvider {
       status: raw?.status ?? "ACTIVE",
       raw
     };
+  }
+
+  async getCheckoutSession(_paymentSessionId) {
+    throw new AppError("Xendit checkout confirmation is currently webhook-only", 422);
   }
 
   createMockCheckoutSession(payload) {

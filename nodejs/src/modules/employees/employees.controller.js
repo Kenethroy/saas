@@ -9,7 +9,9 @@ export class EmployeesController {
 
   list = async (req, res, next) => {
     try {
-      const result = await this.service.list(req.query);
+      const result = await this.service.list(req.auth?.user?.tenantId, req.query, {
+        branchId: req.auth?.branch?.id ?? null
+      });
       res.status(200).json(
         successResponse({
           message: "Employees retrieved successfully",
@@ -24,7 +26,7 @@ export class EmployeesController {
 
   show = async (req, res, next) => {
     try {
-      const employee = await this.service.getById(req.params.id);
+      const employee = await this.service.getById(req.auth?.user?.tenantId, req.params.id);
       res.status(200).json(
         successResponse({
           message: "Employee retrieved successfully",
@@ -38,7 +40,8 @@ export class EmployeesController {
 
   create = async (req, res, next) => {
     try {
-      const result = await this.service.create(req.body, {
+      const result = await this.service.create(req.auth?.user?.tenantId, req.body, {
+        branchId: req.auth?.branch?.id ?? null,
         ipAddress: getPersistedRequestIp(req)
       });
       res.status(201).json(
@@ -54,7 +57,7 @@ export class EmployeesController {
 
   update = async (req, res, next) => {
     try {
-      const employee = await this.service.update(req.params.id, req.body, {
+      const employee = await this.service.update(req.auth?.user?.tenantId, req.params.id, req.body, {
         ipAddress: getPersistedRequestIp(req)
       });
       res.status(200).json(
@@ -70,7 +73,7 @@ export class EmployeesController {
 
   delete = async (req, res, next) => {
     try {
-      await this.service.delete(req.params.id, {
+      await this.service.delete(req.auth?.user?.tenantId, req.params.id, {
         ipAddress: getPersistedRequestIp(req)
       });
       res.status(200).json(

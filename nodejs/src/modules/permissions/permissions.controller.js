@@ -22,7 +22,7 @@ export class PermissionsController {
 
   listRoles = async (_req, res, next) => {
     try {
-      const roles = await this.service.listRoles();
+      const roles = await this.service.listRoles(_req.auth?.user?.tenantId);
       res.status(200).json(
         successResponse({
           message: "Roles retrieved successfully",
@@ -36,7 +36,7 @@ export class PermissionsController {
 
   getUserPermissions = async (req, res, next) => {
     try {
-      const data = await this.service.getUserPermissions(req.params.id);
+      const data = await this.service.getUserPermissions(req.auth?.user?.tenantId, req.params.id);
       res.status(200).json(
         successResponse({
           message: "User permissions retrieved successfully",
@@ -50,7 +50,7 @@ export class PermissionsController {
 
   syncUserPermissions = async (req, res, next) => {
     try {
-      await this.service.syncUserPermissions(req.params.id, req.body.permissionIds);
+      await this.service.syncUserPermissions(req.auth?.user?.tenantId, req.params.id, req.body.permissionIds);
       res.status(200).json(
         successResponse({
           message: "User permissions updated successfully"

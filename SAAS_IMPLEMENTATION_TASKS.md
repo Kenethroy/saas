@@ -183,11 +183,11 @@ Important rule:
 
 ## Phase 6: ERP query refactor
 
-- [ ] audit every repository/service query for tenant scoping
-- [ ] add `tenant_id` filters everywhere required
-- [ ] add `branch_id` filters to branch-sensitive modules
-- [ ] move stock handling to branch-aware balances
-- [ ] make document numbering use `document_sequences`
+- [x] audit every repository/service query for tenant scoping
+- [x] add `tenant_id` filters everywhere required
+- [x] add `branch_id` filters to branch-sensitive modules
+- [x] move stock handling to branch-aware balances
+- [x] make document numbering use `document_sequences`
 - [x] purchase order numbering uses `document_sequences` (API)
 - [x] payslip numbering uses `document_sequences` (API)
 - [x] customer + supplier payment numbering uses `document_sequences` (API)
@@ -208,6 +208,7 @@ Important rule:
 - [x] tenant-scope master data modules: customers, suppliers, products, categories, payment terms
 - [x] tenant-scope customer and supplier payment lookups/writes used by those modules
 - [x] tenant-scope sales orders, deliveries, delivery selection, invoice PDF, and fulfillment transaction writes
+- [x] branch-aware stock balances wired into products, quotations, sales orders, deliveries, purchase receiving, adjustments, returns, dashboard, and reports
 
 Highest-risk modules:
 
@@ -226,10 +227,10 @@ Highest-risk modules:
 
 - [x] create platform admin auth path (API)
 - [x] tenant search/list endpoint (API)
-- [ ] plan management page
-- [ ] subscription review page
-- [ ] manual suspend/reactivate controls
-- [ ] domain and onboarding audit view
+- [x] plan management page
+- [x] subscription review page
+- [x] manual suspend/reactivate controls
+- [x] domain and onboarding audit view
 
 ## Acceptance checklist
 

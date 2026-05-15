@@ -2,6 +2,14 @@ import bcrypt from "bcryptjs";
 import { AppError } from "#shared/utils/app-error";
 import { UsersRepository } from "#modules/users/users.repository";
 
+function requireTenantId(tenantId) {
+  const normalized = Number(tenantId);
+  if (!normalized) {
+    throw new AppError("Tenant context is required", 401);
+  }
+  return normalized;
+}
+
 function normalizeUser(record) {
   return {
     id: Number(record.id),
@@ -42,8 +50,9 @@ export class UsersService {
     this.repository = repository;
   }
 
-  async list(filters) {
-    const { rows, total } = await this.repository.findPaginated({
+  async list(tenantId, filters) {
+    const scopedTenantId = requireTenantId(tenantId);
+    const { rows, total } = await this.repository.findPaginated(scopedTenantId, {
       page: filters.page,
       perPage: filters.perPage,
       search: filters.search,
@@ -62,8 +71,8 @@ export class UsersService {
     };
   }
 
-  async getById(id) {
-    const user = await this.repository.findById(id);
+  async getById(tenantId, id) {
+    const user = await this.repository.findById(requireTenantId(tenantId), id);
 
     if (!user) {
       throw new AppError("User not found", 404);
@@ -72,32 +81,33 @@ export class UsersService {
     return normalizeUser(user);
   }
 
-  async listAvailableEmployees(search) {
-    const rows = await this.repository.findAvailableEmployees(search);
+  async listAvailableEmployees(tenantId, search) {
+    const rows = await this.repository.findAvailableEmployees(requireTenantId(tenantId), search);
     return rows.map(normalizeAvailableEmployee);
   }
 
-  async create(payload, context = {}) {
+  async create(tenantId, payload, context = {}) {
+    const scopedTenantId = requireTenantId(tenantId);
     if (payload.role === "admin") {
       throw new AppError("Admin accounts are not manageable from this screen", 403);
     }
 
-    const employee = await this.repository.findEmployeeById(payload.employeeId);
+    const employee = await this.repository.findEmployeeById(scopedTenantId, payload.employeeId);
     if (!employee) {
       throw new AppError("Selected employee does not exist", 422);
     }
 
-    const existingEmployeeUser = await this.repository.findByEmployeeId(payload.employeeId);
+    const existingEmployeeUser = await this.repository.findByEmployeeId(scopedTenantId, payload.employeeId);
     if (existingEmployeeUser) {
       throw new AppError("This employee already has a user account", 409);
     }
 
-    const existingUsername = await this.repository.findByUsername(payload.username);
+    const existingUsername = await this.repository.findByUsername(scopedTenantId, payload.username);
     if (existingUsername) {
       throw new AppError("Username already exists", 409);
     }
 
-    const existingEmail = await this.repository.findByEmail(payload.email);
+    const existingEmail = await this.repository.findByEmail(scopedTenantId, payload.email);
     if (existingEmail) {
       throw new AppError("Email already exists", 409);
     }
@@ -105,6 +115,7 @@ export class UsersService {
     const passwordHash = (await bcrypt.hash(payload.password, 10)).trim();
 
     const user = await this.repository.create({
+      tenantId: scopedTenantId,
       employeeId: payload.employeeId,
       username: payload.username,
       email: payload.email,
@@ -118,8 +129,9 @@ export class UsersService {
     return normalizeUser(user);
   }
 
-  async update(id, payload, context = {}) {
-    const existing = await this.repository.findById(id);
+  async update(tenantId, id, payload, context = {}) {
+    const scopedTenantId = requireTenantId(tenantId);
+    const existing = await this.repository.findById(scopedTenantId, id);
     if (!existing) {
       throw new AppError("User not found", 404);
     }
@@ -129,14 +141,14 @@ export class UsersService {
     }
 
     if (payload.username && payload.username !== existing.username) {
-      const usernameMatch = await this.repository.findByUsername(payload.username);
+      const usernameMatch = await this.repository.findByUsername(scopedTenantId, payload.username);
       if (usernameMatch && usernameMatch.id !== existing.id) {
         throw new AppError("Username already exists", 409);
       }
     }
 
     if (payload.email && payload.email !== existing.email) {
-      const emailMatch = await this.repository.findByEmail(payload.email);
+      const emailMatch = await this.repository.findByEmail(scopedTenantId, payload.email);
       if (emailMatch && emailMatch.id !== existing.id) {
         throw new AppError("Email already exists", 409);
       }
@@ -153,7 +165,7 @@ export class UsersService {
       updateData.passwordHash = (await bcrypt.hash(payload.password, 10)).trim();
     }
 
-    const user = await this.repository.update(id, {
+    const user = await this.repository.update(scopedTenantId, id, {
       ...updateData,
       updatedIp: context.ipAddress ?? null
     });
@@ -161,8 +173,9 @@ export class UsersService {
     return normalizeUser(user);
   }
 
-  async delete(id, context = {}) {
-    const existing = await this.repository.findById(id);
+  async delete(tenantId, id, context = {}) {
+    const scopedTenantId = requireTenantId(tenantId);
+    const existing = await this.repository.findById(scopedTenantId, id);
     if (!existing) {
       throw new AppError("User not found", 404);
     }
@@ -171,7 +184,7 @@ export class UsersService {
       throw new AppError("Admin accounts are protected and cannot be deleted", 403);
     }
 
-    await this.repository.update(id, {
+    await this.repository.update(scopedTenantId, id, {
       deleteFlag: true,
       status: false,
       updatedIp: context.ipAddress ?? null

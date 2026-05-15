@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { SettingsController } from "#modules/settings/settings.controller";
 import { authenticate } from "#shared/middleware/auth.middleware";
+import { resolveTenant } from "#shared/middleware/tenant-context.middleware";
 import { requirePermission } from "#shared/middleware/permission.middleware";
 import { uploadSystemLogo } from "#shared/middleware/upload.middleware";
 
@@ -8,7 +9,7 @@ const router = Router();
 const controller = new SettingsController();
 
 // Public route for brand logo/name on login/public pages
-router.get("/public", controller.getPublicSettings);
+router.get("/public", resolveTenant, controller.getPublicSettings);
 
 // Protected routes
 router.get("/", authenticate, requirePermission("settings.view"), controller.getSettings);

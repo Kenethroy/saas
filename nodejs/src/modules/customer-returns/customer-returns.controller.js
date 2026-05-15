@@ -9,7 +9,9 @@ export class CustomerReturnsController {
 
   list = async (req, res, next) => {
     try {
-      const result = await this.service.getAllReturns(req.query);
+      const result = await this.service.getAllReturns(req.auth?.user?.tenantId, req.query, {
+        branchId: req.auth?.branch?.id ?? null
+      });
       res.status(200).json(successResponse({
         message: "Customer returns retrieved successfully",
         data: result
@@ -21,7 +23,7 @@ export class CustomerReturnsController {
 
   getById = async (req, res, next) => {
     try {
-      const customerReturn = await this.service.getReturnById(req.params.id);
+      const customerReturn = await this.service.getReturnById(req.auth?.user?.tenantId, req.params.id);
       if (!customerReturn) {
         res.status(404).json({ message: "Customer return not found" });
         return;
@@ -37,7 +39,8 @@ export class CustomerReturnsController {
 
   create = async (req, res, next) => {
     try {
-      const customerReturn = await this.service.createReturn(req.body, {
+      const customerReturn = await this.service.createReturn(req.auth?.user?.tenantId, req.body, {
+        branchId: req.auth?.branch?.id ?? null,
         ipAddress: getPersistedRequestIp(req)
       });
       res.status(201).json(successResponse({
@@ -51,7 +54,8 @@ export class CustomerReturnsController {
 
   update = async (req, res, next) => {
     try {
-      const customerReturn = await this.service.updateReturn(req.params.id, req.body, {
+      const customerReturn = await this.service.updateReturn(req.auth?.user?.tenantId, req.params.id, req.body, {
+        branchId: req.auth?.branch?.id ?? null,
         ipAddress: getPersistedRequestIp(req)
       });
       res.status(200).json(successResponse({
@@ -65,8 +69,9 @@ export class CustomerReturnsController {
 
   approve = async (req, res, next) => {
     try {
-      const result = await this.service.approveReturn(req.params.id, {
+      const result = await this.service.approveReturn(req.auth?.user?.tenantId, req.params.id, {
         userId: req.auth?.user?.id ?? null,
+        branchId: req.auth?.branch?.id ?? null,
         ipAddress: getPersistedRequestIp(req)
       });
       res.status(200).json(successResponse({
@@ -80,7 +85,7 @@ export class CustomerReturnsController {
 
   reject = async (req, res, next) => {
     try {
-      const result = await this.service.rejectReturn(req.params.id, req.body.reason, {
+      const result = await this.service.rejectReturn(req.auth?.user?.tenantId, req.params.id, req.body.reason, {
         userId: req.auth?.user?.id ?? null,
         ipAddress: getPersistedRequestIp(req)
       });
@@ -95,7 +100,7 @@ export class CustomerReturnsController {
 
   delete = async (req, res, next) => {
     try {
-      await this.service.deleteReturn(req.params.id);
+      await this.service.deleteReturn(req.auth?.user?.tenantId, req.params.id);
       res.status(200).json(successResponse({
         message: "Customer return deleted successfully"
       }));
@@ -106,7 +111,9 @@ export class CustomerReturnsController {
 
   listInvoices = async (req, res, next) => {
     try {
-      const data = await this.service.getCustomerInvoices(req.params.customerId);
+      const data = await this.service.getCustomerInvoices(req.auth?.user?.tenantId, req.params.customerId, {
+        branchId: req.auth?.branch?.id ?? null
+      });
       res.status(200).json(successResponse({
         message: "Customer invoices retrieved successfully",
         data

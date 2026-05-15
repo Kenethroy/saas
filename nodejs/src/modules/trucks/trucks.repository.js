@@ -1,11 +1,16 @@
 import { query } from "#shared/database/mysql";
 
 export class TrucksRepository {
-  async findPaginated({ page, perPage, search, status }) {
+  async findPaginated(tenantId, { page, perPage, search, status, branchId = null }) {
     const offset = (page - 1) * perPage;
 
-    let sql = "FROM trucks WHERE delete_flg = 0";
-    const params = [];
+    let sql = "FROM trucks WHERE tenant_id = ? AND delete_flg = 0";
+    const params = [tenantId];
+
+    if (branchId) {
+      sql += " AND branch_id = ?";
+      params.push(branchId);
+    }
 
     if (search) {
       sql += " AND (plate_number LIKE ? OR model LIKE ? OR brand LIKE ?)";
@@ -40,8 +45,8 @@ export class TrucksRepository {
     };
   }
 
-  async findById(id) {
-    const rows = await query("SELECT * FROM trucks WHERE id = ? AND delete_flg = 0 LIMIT 1", [id]);
+  async findById(tenantId, id) {
+    const rows = await query("SELECT * FROM trucks WHERE tenant_id = ? AND id = ? AND delete_flg = 0 LIMIT 1", [tenantId, id]);
     if (!rows[0]) return null;
     return {
       ...rows[0],
@@ -52,8 +57,8 @@ export class TrucksRepository {
     };
   }
 
-  async findByPlateNumber(plateNumber) {
-    const rows = await query("SELECT * FROM trucks WHERE plate_number = ? LIMIT 1", [plateNumber]);
+  async findByPlateNumber(tenantId, plateNumber) {
+    const rows = await query("SELECT * FROM trucks WHERE tenant_id = ? AND plate_number = ? LIMIT 1", [tenantId, plateNumber]);
     if (!rows[0]) return null;
     return {
       ...rows[0],
@@ -64,9 +69,14 @@ export class TrucksRepository {
     };
   }
 
-  async listForAssignment(filters = {}) {
-    let sql = "SELECT id, plate_number as plateNumber, model FROM trucks WHERE delete_flg = 0 AND status = 'active'";
-    const params = [];
+  async listForAssignment(tenantId, filters = {}) {
+    let sql = "SELECT id, plate_number as plateNumber, model FROM trucks WHERE tenant_id = ? AND delete_flg = 0 AND status = 'active'";
+    const params = [tenantId];
+
+    if (filters.branchId) {
+      sql += " AND branch_id = ?";
+      params.push(filters.branchId);
+    }
 
     if (filters.search) {
       sql += " AND (plate_number LIKE ? OR model LIKE ?)";
@@ -80,17 +90,18 @@ export class TrucksRepository {
 
   async create(data) {
     const sql = `
-      INSERT INTO trucks (plate_number, model, brand, year, color, capacity_kg, status, notes, delete_flg, created_ip, updated_ip)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+      INSERT INTO trucks (tenant_id, branch_id, plate_number, model, brand, year, color, capacity_kg, status, notes, delete_flg, created_ip, updated_ip)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
     `;
     const result = await query(sql, [
+      data.tenantId, data.branchId ?? null,
       data.plateNumber, data.model ?? null, data.brand ?? null, data.year ?? null, data.color ?? null, data.capacityKg ?? null,
       data.status || 'active', data.notes ?? null, data.createdIp || null, data.updatedIp || null
     ]);
-    return this.findById(result.insertId);
+    return this.findById(data.tenantId, result.insertId);
   }
 
-  async update(id, data) {
+  async update(tenantId, id, data) {
     const fields = [];
     const params = [];
 
@@ -114,6 +125,10 @@ export class TrucksRepository {
       fields.push("color = ?");
       params.push(data.color);
     }
+    if (data.branchId !== undefined) {
+      fields.push("branch_id = ?");
+      params.push(data.branchId);
+    }
     if (data.capacityKg !== undefined) {
       fields.push("capacity_kg = ?");
       params.push(data.capacityKg);
@@ -135,11 +150,11 @@ export class TrucksRepository {
       params.push(data.updatedIp);
     }
 
-    if (fields.length === 0) return this.findById(id);
+    if (fields.length === 0) return this.findById(tenantId, id);
 
-    const sql = `UPDATE trucks SET ${fields.join(", ")} WHERE id = ?`;
-    params.push(id);
+    const sql = `UPDATE trucks SET ${fields.join(", ")} WHERE tenant_id = ? AND id = ?`;
+    params.push(tenantId, id);
     await query(sql, params);
-    return this.findById(id);
+    return this.findById(tenantId, id);
   }
 }

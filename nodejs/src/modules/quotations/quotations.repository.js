@@ -1,6 +1,7 @@
 import { query, transaction } from "#shared/database/mysql";
 import { AppError } from "#shared/utils/app-error";
 import { allocateDocumentNumber } from "#shared/utils/document-sequences";
+import { getBranchInventoryQuantities } from "#shared/utils/branch-inventory";
 
 export class QuotationsRepository {
   async findCustomerById(tenantId, customerId) {
@@ -40,14 +41,15 @@ export class QuotationsRepository {
     return rows[0] || null;
   }
 
-  async findProductVariantsByIds(tenantId, productVariantIds) {
+  async findProductVariantsByIds(tenantId, productVariantIds, options = {}) {
     if (!productVariantIds.length) return [];
-    return query(`
+    const rows = await query(`
       SELECT pv.*, p.name as product_name
       FROM product_variants pv
       JOIN products p ON pv.product_id = p.id AND p.tenant_id = pv.tenant_id
       WHERE pv.tenant_id = ? AND pv.id IN (?) AND pv.delete_flg = 0 AND pv.status = 1
     `, [tenantId, productVariantIds]);
+    return this._applyBranchStockToVariants(tenantId, rows, options.branchId ?? null);
   }
 
   async findLatestQuotation(tenantId) {
@@ -60,7 +62,7 @@ export class QuotationsRepository {
     return rows[0] || null;
   }
 
-  async findPaginated(tenantId, { page, perPage, search, status, customerId, agentId }) {
+  async findPaginated(tenantId, { page, perPage, search, status, customerId, agentId, branchId = null }) {
     const offset = (page - 1) * perPage;
     let whereSql = "WHERE q.tenant_id = ? AND q.delete_flg = 0";
     const params = [tenantId];
@@ -81,6 +83,10 @@ export class QuotationsRepository {
     if (agentId) {
       whereSql += " AND q.agent_id = ?";
       params.push(agentId);
+    }
+    if (branchId) {
+      whereSql += " AND q.branch_id = ?";
+      params.push(Number(branchId));
     }
 
     const countSql = `SELECT COUNT(*) as total FROM quotations q LEFT JOIN customers c ON q.customer_id = c.id ${whereSql}`;
@@ -114,6 +120,7 @@ export class QuotationsRepository {
         WHERE qi.tenant_id = ? AND qi.quotation_id = ?
         ORDER BY qi.id ASC
       `, [tenantId, row.id]);
+      const stockAwareItems = await this._applyBranchStockToItems(tenantId, items, Number(row.branch_id ?? 0) || null);
 
       return {
         ...row,
@@ -143,7 +150,7 @@ export class QuotationsRepository {
         agent: row.agent_id ? { id: row.agent_id, firstName: row.agent_first_name, lastName: row.agent_last_name } : null,
         paymentTerm: row.payment_term_id ? { id: row.payment_term_id, name: row.payment_term_name, days: row.payment_term_days } : null,
         salesOrder: row.sales_order_id ? { id: row.sales_order_id, salesOrderNumber: row.sales_order_number, status: row.so_status } : null,
-        items: items.map(item => ({
+        items: stockAwareItems.map(item => ({
           ...item,
           id: item.id,
           productId: item.product_id,
@@ -156,7 +163,7 @@ export class QuotationsRepository {
           lineTotal: item.line_total,
           productVariant: { stockQuantity: item.stock_quantity }
         })),
-        _count: { items: items.length }
+        _count: { items: stockAwareItems.length }
       };
     }));
 
@@ -190,6 +197,7 @@ export class QuotationsRepository {
       WHERE qi.tenant_id = ? AND qi.quotation_id = ?
       ORDER BY qi.id ASC
     `, [tenantId, id]);
+    const stockAwareItems = await this._applyBranchStockToItems(tenantId, items, Number(row.branch_id ?? 0) || null);
 
     return {
       ...row,
@@ -222,7 +230,7 @@ export class QuotationsRepository {
       agent: row.agent_id ? { id: row.agent_id, firstName: row.agent_first_name, lastName: row.agent_last_name } : null,
       paymentTerm: row.payment_term_id ? { id: row.payment_term_id, name: row.payment_term_name, days: row.payment_term_days } : null,
       salesOrder: row.sales_order_id ? { id: row.sales_order_id, salesOrderNumber: row.sales_order_number, status: row.so_status } : null,
-      items: items.map(item => ({
+      items: stockAwareItems.map(item => ({
         ...item,
         id: item.id,
         productId: item.product_id,
@@ -345,20 +353,6 @@ export class QuotationsRepository {
       if (quotation.status !== "accepted") throw new AppError("Only accepted quotations can be converted.", 422);
       if (quotation.sales_order_id) throw new AppError("Quotation has already been converted to a sales order.", 422);
 
-      const [items] = await tx.execute("SELECT * FROM quotation_items WHERE tenant_id = ? AND quotation_id = ?", [tenantId, id]);
-
-      for (const item of items) {
-        const [variantRows] = await tx.execute(
-          "SELECT name, stock_quantity FROM product_variants WHERE tenant_id = ? AND id = ?",
-          [tenantId, item.product_variant_id]
-        );
-        const variant = variantRows[0];
-        if (!variant) throw new AppError(`Variant ${item.product_variant_id} not found`, 404);
-        if (Number(variant.stock_quantity) < Number(item.quantity)) {
-          throw new AppError(`Insufficient stock for ${variant.name}`, 422);
-        }
-      }
-
       let effectiveBranchId = context.branchId ? Number(context.branchId) : (quotation.branch_id ? Number(quotation.branch_id) : null);
       if (!effectiveBranchId) {
         const [branchRows] = await tx.execute(
@@ -372,6 +366,20 @@ export class QuotationsRepository {
           [Number(tenantId)]
         );
         effectiveBranchId = branchRows[0]?.id ? Number(branchRows[0].id) : null;
+      }
+
+      const [items] = await tx.execute("SELECT * FROM quotation_items WHERE tenant_id = ? AND quotation_id = ?", [tenantId, id]);
+      const variants = await this.findProductVariantsByIds(tenantId, items.map((item) => Number(item.product_variant_id)), {
+        branchId: effectiveBranchId
+      });
+      const variantMap = new Map(variants.map((variant) => [Number(variant.id), variant]));
+
+      for (const item of items) {
+        const variant = variantMap.get(Number(item.product_variant_id));
+        if (!variant) throw new AppError(`Variant ${item.product_variant_id} not found`, 404);
+        if (Number(variant.stock_quantity) < Number(item.quantity)) {
+          throw new AppError(`Insufficient stock for ${variant.name}`, 422);
+        }
       }
 
       const salesOrderNumber = await allocateDocumentNumber({
@@ -437,5 +445,43 @@ export class QuotationsRepository {
 
       return { id: salesOrderId, salesOrderNumber };
     });
+  }
+
+  async _applyBranchStockToVariants(tenantId, variants = [], branchId = null) {
+    if (!branchId || variants.length === 0) {
+      return variants;
+    }
+
+    const { quantities } = await getBranchInventoryQuantities({
+      tenantId,
+      branchId,
+      variantIds: variants.map((variant) => Number(variant.id))
+    });
+
+    return variants.map((variant) => ({
+      ...variant,
+      stock_quantity: quantities.has(Number(variant.id))
+        ? Number(quantities.get(Number(variant.id)))
+        : 0
+    }));
+  }
+
+  async _applyBranchStockToItems(tenantId, items = [], branchId = null) {
+    if (!branchId || !items.length) {
+      return items;
+    }
+
+    const { quantities } = await getBranchInventoryQuantities({
+      tenantId,
+      branchId,
+      variantIds: items.map((item) => Number(item.product_variant_id))
+    });
+
+    return items.map((item) => ({
+      ...item,
+      stock_quantity: quantities.has(Number(item.product_variant_id))
+        ? Number(quantities.get(Number(item.product_variant_id)))
+        : 0
+    }));
   }
 }

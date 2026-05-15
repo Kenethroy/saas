@@ -132,7 +132,7 @@ export class ProductsService {
     this.repository = repository;
   }
 
-  async list(tenantId, filters) {
+  async list(tenantId, filters, context = {}) {
     const scopedTenantId = requireTenantId(tenantId);
     const page = filters.page ?? 1;
     const perPage = filters.perPage ?? 10;
@@ -144,6 +144,8 @@ export class ProductsService {
     }, {
       page,
       perPage
+    }, {
+      branchId: context.branchId ?? null
     });
 
     return {
@@ -157,25 +159,29 @@ export class ProductsService {
     };
   }
 
-  async getById(tenantId, id) {
-    const product = await this.repository.findById(requireTenantId(tenantId), id);
+  async getById(tenantId, id, context = {}) {
+    const product = await this.repository.findById(requireTenantId(tenantId), id, {
+      branchId: context.branchId ?? null
+    });
     if (!product) throw new AppError("Product not found", 404);
     return normalizeProduct(product);
   }
 
-  async listForSalesOrder(tenantId, filters) {
+  async listForSalesOrder(tenantId, filters, context = {}) {
     const scopedTenantId = requireTenantId(tenantId);
     const variants = await this.repository.listOrderableVariants(scopedTenantId, {
       search: filters.search,
       categoryId: filters.categoryId,
-      context: filters.context
+      context: filters.context,
+      branchId: context.branchId ?? null
     });
 
     const reservedQuantities = await this.repository.sumReservedQuantitiesByVariantIds(
       scopedTenantId,
       variants.map((variant) => Number(variant.id)),
       {
-        excludeSalesOrderId: filters.salesOrderId
+        excludeSalesOrderId: filters.salesOrderId,
+        branchId: context.branchId ?? null
       }
     );
 
@@ -191,19 +197,21 @@ export class ProductsService {
     );
   }
 
-  async listInventoryOverview(tenantId, filters) {
+  async listInventoryOverview(tenantId, filters, context = {}) {
     const scopedTenantId = requireTenantId(tenantId);
     const page = filters.page ?? 1;
     const perPage = filters.perPage ?? 12;
 
     const variants = await this.repository.findInventoryOverviewVariants(scopedTenantId, {
       search: filters.search,
-      categoryId: filters.categoryId
+      categoryId: filters.categoryId,
+      branchId: context.branchId ?? null
     });
 
     const reservedQuantities = await this.repository.sumReservedQuantitiesByVariantIds(
       scopedTenantId,
-      variants.map((variant) => Number(variant.id))
+      variants.map((variant) => Number(variant.id)),
+      { branchId: context.branchId ?? null }
     );
 
     const reservedByVariantId = new Map(

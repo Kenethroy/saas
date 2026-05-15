@@ -24,7 +24,7 @@ export class ActivityLogsRepository {
       : null;
   }
 
-  async findAll({ search, action, dateFrom, limit = 100, page = 1 }) {
+  async findAll({ tenantId, branchId = null, search, action, dateFrom, limit = 100, page = 1 }) {
     const offset = (page - 1) * limit;
     let sql = `
       SELECT 
@@ -34,11 +34,16 @@ export class ActivityLogsRepository {
         e.first_name as firstName, 
         e.last_name as lastName
       FROM activity_logs l
-      LEFT JOIN users u ON l.user_id = u.id
-      LEFT JOIN employees e ON u.employee_id = e.id
-      WHERE 1=1
+      LEFT JOIN users u ON l.user_id = u.id AND u.tenant_id = l.tenant_id
+      LEFT JOIN employees e ON u.employee_id = e.id AND e.tenant_id = l.tenant_id
+      WHERE l.tenant_id = ?
     `;
-    const params = [];
+    const params = [tenantId];
+
+    if (branchId) {
+      sql += " AND l.branch_id = ?";
+      params.push(branchId);
+    }
 
     if (search) {
       sql += ` AND (

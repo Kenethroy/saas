@@ -44,7 +44,8 @@ a {
 
 button,
 input,
-textarea {
+textarea,
+select {
   font: inherit;
 }
 
@@ -53,7 +54,8 @@ button {
 }
 
 input,
-textarea {
+textarea,
+select {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 16px;
@@ -72,6 +74,11 @@ textarea {
   padding: 1.25rem 0 4rem;
 }
 
+.page-stack {
+  display: grid;
+  gap: 1.5rem;
+}
+
 .topbar {
   display: flex;
   align-items: center;
@@ -84,6 +91,13 @@ textarea {
   background: rgba(255, 251, 245, 0.7);
   backdrop-filter: blur(18px);
   box-shadow: var(--shadow);
+}
+
+.topbar-copy {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.85rem;
 }
 
 .brand {
@@ -128,8 +142,52 @@ textarea {
   gap: 0.75rem;
 }
 
-.topnav a {
+.topnav-link,
+.topnav-button {
   color: var(--muted);
+  transition: color 180ms ease, border-color 180ms ease, background 180ms ease;
+}
+
+.topnav-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+  padding: 0.55rem 0.95rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+}
+
+.topnav-link:hover,
+.topnav-link.active {
+  color: var(--text);
+  border-color: var(--line);
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.mode-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2rem;
+  padding: 0.3rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.mode-pill.public {
+  color: var(--primary-strong);
+  border-color: rgba(168, 62, 31, 0.14);
+  background: rgba(168, 62, 31, 0.08);
+}
+
+.mode-pill.admin {
+  color: #17406d;
+  border-color: rgba(23, 64, 109, 0.16);
+  background: rgba(23, 64, 109, 0.08);
 }
 
 .page-grid,
@@ -216,6 +274,10 @@ textarea {
   box-shadow: var(--shadow);
 }
 
+.feature-card {
+  background: linear-gradient(180deg, rgba(255, 253, 248, 0.96), rgba(255, 248, 241, 0.9));
+}
+
 .card h2 {
   margin: 0 0 0.35rem;
   font-size: 1.8rem;
@@ -282,10 +344,18 @@ textarea {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.admin-plan-grid {
+  grid-template-columns: 1fr;
+}
+
 .plan-card {
   display: grid;
   gap: 1rem;
   padding: 1.25rem;
+}
+
+.admin-plan-card {
+  gap: 1.25rem;
 }
 
 .plan-card h3 {
@@ -345,12 +415,197 @@ textarea {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.admin-summary-grid {
+  margin-bottom: 1.25rem;
+}
+
+.admin-plan-header,
+.admin-review-header,
+.admin-price-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.admin-filter-actions,
+.admin-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.admin-pagination-panel {
+  min-width: 132px;
+  text-align: center;
+}
+
+.admin-review-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.admin-review-card {
+  gap: 1rem;
+}
+
+.admin-review-card.selected,
+.admin-detail-panel {
+  border-color: rgba(168, 62, 31, 0.28);
+  background: rgba(255, 250, 245, 0.94);
+}
+
+.admin-review-domain {
+  display: block;
+  margin-top: 0.2rem;
+}
+
+.admin-review-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem 1rem;
+}
+
+.admin-review-facts span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.admin-review-facts strong {
+  display: block;
+  margin-top: 0.2rem;
+}
+
+.admin-detail-panel {
+  gap: 1rem;
+  position: sticky;
+  top: 1rem;
+}
+
+.admin-detail-section {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.admin-detail-section h3 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-family: "Fraunces", Georgia, serif;
+}
+
+.admin-domain-card {
+  gap: 0.85rem;
+}
+
+.admin-code-block {
+  margin: 0;
+  overflow: auto;
+  border-radius: 16px;
+  padding: 0.9rem 1rem;
+  background: rgba(35, 25, 16, 0.92);
+  color: #f7e7d9;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2rem;
+  padding: 0.35rem 0.8rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.status-pill.success {
+  color: var(--success);
+  border-color: rgba(14, 111, 92, 0.18);
+  background: rgba(14, 111, 92, 0.08);
+}
+
+.status-pill.warning {
+  color: var(--warning);
+  border-color: rgba(157, 101, 0, 0.18);
+  background: rgba(157, 101, 0, 0.08);
+}
+
+.admin-price-meta {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 0.9rem;
+}
+
+.admin-price-stack {
+  gap: 1rem;
+}
+
+.admin-price-card {
+  gap: 1rem;
+}
+
+.admin-price-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.85rem;
+}
+
+.admin-price-total {
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.toggle-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.75rem;
+}
+
+.toggle-card {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 0.9rem 1rem;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.toggle-card input {
+  width: auto;
+  margin: 0;
+}
+
+.toggle-card span {
+  font-weight: 600;
+}
+
+.toggle-card.compact {
+  display: inline-flex;
+  width: auto;
+  padding: 0.65rem 0.85rem;
+}
+
 @media (max-width: 920px) {
   .hero,
   .card-grid,
   .plan-grid,
   .status-grid,
-  .field-row {
+  .field-row,
+  .admin-review-grid,
+  .admin-review-facts {
     grid-template-columns: 1fr;
   }
 
@@ -361,6 +616,21 @@ textarea {
 
   .topnav {
     justify-content: flex-start;
+  }
+
+  .topbar-copy {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .admin-plan-header,
+  .admin-review-header,
+  .admin-price-header {
+    flex-direction: column;
+  }
+
+  .admin-detail-panel {
+    position: static;
   }
 }
 
@@ -376,5 +646,12 @@ textarea {
 
   .cta-row {
     grid-template-columns: 1fr;
+  }
+
+  .topnav-link,
+  .topnav-button,
+  .toggle-card.compact {
+    width: 100%;
+    justify-content: center;
   }
 }

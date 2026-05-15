@@ -487,7 +487,7 @@ export class DashboardService {
     this.repository = repository;
   }
 
-  async getOverview(params = {}) {
+  async getOverview(tenantId, params = {}, context = {}) {
     const { year, month } = normalizePeriod(params);
 
     const selectedRange = buildMonthRange(year, month);
@@ -504,15 +504,15 @@ export class DashboardService {
       inventoryVariants,
       agentReceivables
     ] = await Promise.all([
-      this.repository.findSalesOrdersInRange(selectedRange.start, selectedRange.end),
-      this.repository.findPurchaseOrdersInRange(selectedRange.start, selectedRange.end),
-      this.repository.findExpensesInRange(selectedRange.start, selectedRange.end),
-      this.repository.findPaymentAllocationsInRange(selectedRange.start, selectedRange.end),
-      this.repository.findSalesOrdersInRange(trendRange.start, trendRange.end),
-      this.repository.findPaymentAllocationsInRange(trendRange.start, trendRange.end),
-      this.repository.findOpenReceivables(),
-      this.repository.findInventoryVariants(),
-      this.repository.findReceivablesInRange(selectedRange.start, selectedRange.end)
+      this.repository.findSalesOrdersInRange(tenantId, selectedRange.start, selectedRange.end, { branchId: context.branchId ?? null }),
+      this.repository.findPurchaseOrdersInRange(tenantId, selectedRange.start, selectedRange.end, { branchId: context.branchId ?? null }),
+      this.repository.findExpensesInRange(tenantId, selectedRange.start, selectedRange.end, { branchId: context.branchId ?? null }),
+      this.repository.findPaymentAllocationsInRange(tenantId, selectedRange.start, selectedRange.end, { branchId: context.branchId ?? null }),
+      this.repository.findSalesOrdersInRange(tenantId, trendRange.start, trendRange.end, { branchId: context.branchId ?? null }),
+      this.repository.findPaymentAllocationsInRange(tenantId, trendRange.start, trendRange.end, { branchId: context.branchId ?? null }),
+      this.repository.findOpenReceivables(tenantId, { branchId: context.branchId ?? null }),
+      this.repository.findInventoryVariants(tenantId, { branchId: context.branchId ?? null }),
+      this.repository.findReceivablesInRange(tenantId, selectedRange.start, selectedRange.end, { branchId: context.branchId ?? null })
     ]);
 
     const lowStockAlert = buildLowStockAlert(inventoryVariants);
@@ -549,9 +549,11 @@ export class DashboardService {
     };
   }
 
-  async getReceivablesCalendar(params = {}) {
+  async getReceivablesCalendar(tenantId, params = {}, context = {}) {
     const { year, month } = normalizePeriod(params);
-    const openReceivables = await this.repository.findOpenReceivables();
+    const openReceivables = await this.repository.findOpenReceivables(tenantId, {
+      branchId: context.branchId ?? null
+    });
 
     return {
       period: {
@@ -564,11 +566,11 @@ export class DashboardService {
     };
   }
 
-  async getNotifications() {
+  async getNotifications(tenantId, context = {}) {
     const [openReceivables, inventoryVariants, settings] = await Promise.all([
-      this.repository.findOpenReceivables(),
-      this.repository.findInventoryVariants(),
-      this.repository.findNotificationSettings()
+      this.repository.findOpenReceivables(tenantId, { branchId: context.branchId ?? null }),
+      this.repository.findInventoryVariants(tenantId, { branchId: context.branchId ?? null }),
+      this.repository.findNotificationSettings(tenantId)
     ]);
 
     const settingsMap = new Map(settings.map((item) => [item.key, item.value]));

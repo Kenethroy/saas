@@ -1,6 +1,5 @@
 import { AppError } from "#shared/utils/app-error";
 import { DeliveriesRepository } from "#modules/deliveries/deliveries.repository";
-import { AppError } from "#shared/utils/app-error";
 
 function requireTenantId(tenantId) {
   const normalized = Number(tenantId);
@@ -35,14 +34,15 @@ export class DeliveriesService {
     this.repository = repository;
   }
 
-  async list(tenantId, filters) {
+  async list(tenantId, filters, context = {}) {
     const scopedTenantId = requireTenantId(tenantId);
     const page = parseInt(filters.page) || 1;
     const perPage = parseInt(filters.perPage) || 10;
     const { rows, total } = await this.repository.findPaginated(scopedTenantId, {
       ...filters,
       page,
-      perPage
+      perPage,
+      branchId: context.branchId ?? null
     });
 
     return {
@@ -72,10 +72,12 @@ export class DeliveriesService {
     };
   }
 
-  async getSelectionOptions(tenantId) {
+  async getSelectionOptions(tenantId, context = {}) {
     const scopedTenantId = requireTenantId(tenantId);
     const [salesOrders, drivers, trucks] = await Promise.all([
-      this.repository.findSalesOrdersForSelection(scopedTenantId),
+      this.repository.findSalesOrdersForSelection(scopedTenantId, {
+        branchId: context.branchId ?? null
+      }),
       this.repository.findActiveEmployees(scopedTenantId, { position: "driver" }),
       this.repository.findTrucksForAssignment(scopedTenantId)
     ]);

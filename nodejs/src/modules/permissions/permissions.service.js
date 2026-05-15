@@ -1,6 +1,14 @@
 import { AppError } from "#shared/utils/app-error";
 import { PermissionsRepository } from "#modules/permissions/permissions.repository";
 
+function requireTenantId(tenantId) {
+  const normalized = Number(tenantId);
+  if (!normalized) {
+    throw new AppError("Tenant context is required", 401);
+  }
+  return normalized;
+}
+
 function normalizePermission(permission) {
   return {
     id: Number(permission.id),
@@ -30,8 +38,8 @@ export class PermissionsService {
     return permissions.map(normalizePermission);
   }
 
-  async listRoles() {
-    return this.repository.listRoleSummaries();
+  async listRoles(tenantId) {
+    return this.repository.listRoleSummaries(requireTenantId(tenantId));
   }
 
   async getRolePermissions(role) {
@@ -39,14 +47,15 @@ export class PermissionsService {
     return links.map(normalizePermissionLink);
   }
 
-  async getUserPermissions(userId) {
-    const user = await this.repository.findUserById(userId);
+  async getUserPermissions(tenantId, userId) {
+    const scopedTenantId = requireTenantId(tenantId);
+    const user = await this.repository.findUserById(scopedTenantId, userId);
     if (!user) {
       throw new AppError("User not found", 404);
     }
 
     const [overrides, rolePermissions] = await Promise.all([
-      this.repository.getUserPermissionLinks(userId),
+      this.repository.getUserPermissionLinks(scopedTenantId, userId),
       this.repository.getRolePermissionLinks(user.role)
     ]);
 
@@ -61,14 +70,15 @@ export class PermissionsService {
     await this.repository.syncRolePermissions(role, permissionIds);
   }
 
-  async syncUserPermissions(userId, permissionIds) {
-    const user = await this.repository.findUserById(userId);
+  async syncUserPermissions(tenantId, userId, permissionIds) {
+    const scopedTenantId = requireTenantId(tenantId);
+    const user = await this.repository.findUserById(scopedTenantId, userId);
     if (!user) {
       throw new AppError("User not found", 404);
     }
 
     await this.assertValidPermissionIds(permissionIds);
-    await this.repository.syncUserPermissions(userId, permissionIds);
+    await this.repository.syncUserPermissions(scopedTenantId, userId, permissionIds);
   }
 
   async assertValidPermissionIds(permissionIds) {

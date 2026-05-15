@@ -1,4 +1,5 @@
 import { AgentPerformanceRepository } from "#modules/agent-performance/agent-performance.repository";
+import { AppError } from "#shared/utils/app-error";
 
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const NON_CASH_METHODS = new Set(["cheque", "bank_transfer", "credit_card"]);
@@ -664,16 +665,25 @@ export class AgentPerformanceService {
     this.repository = repository;
   }
 
-  async getSales(params = {}) {
+  requireTenantId(tenantId) {
+    const normalized = Number(tenantId);
+    if (!normalized) {
+      throw new AppError("Tenant context is required", 401);
+    }
+    return normalized;
+  }
+
+  async getSales(tenantId, params = {}) {
+    const scopedTenantId = this.requireTenantId(tenantId);
     const input = resolvePeriodInput(params);
     const range = buildDateRange(input);
     const comparisonInput = buildComparisonInput(input);
     const comparisonRange = comparisonInput ? buildDateRange(comparisonInput) : null;
 
     const [currentRecords, previousRecords] = await Promise.all([
-      this.repository.findReceivablesInRange({ ...range, search: input.search }),
+      this.repository.findReceivablesInRange(scopedTenantId, { ...range, search: input.search }),
       comparisonRange
-        ? this.repository.findReceivablesInRange({ ...comparisonRange, search: input.search })
+        ? this.repository.findReceivablesInRange(scopedTenantId, { ...comparisonRange, search: input.search })
         : Promise.resolve([])
     ]);
 
@@ -688,16 +698,17 @@ export class AgentPerformanceService {
     };
   }
 
-  async getSalesTrend(params = {}) {
+  async getSalesTrend(tenantId, params = {}) {
+    const scopedTenantId = this.requireTenantId(tenantId);
     const input = resolvePeriodInput(params);
     const range = buildDateRange(input);
     const comparisonInput = buildComparisonInput(input);
     const comparisonRange = comparisonInput ? buildDateRange(comparisonInput) : null;
 
     const [currentRecords, previousRecords] = await Promise.all([
-      this.repository.findReceivablesInRange({ ...range, search: input.search }),
+      this.repository.findReceivablesInRange(scopedTenantId, { ...range, search: input.search }),
       comparisonRange
-        ? this.repository.findReceivablesInRange({ ...comparisonRange, search: input.search })
+        ? this.repository.findReceivablesInRange(scopedTenantId, { ...comparisonRange, search: input.search })
         : Promise.resolve([])
     ]);
 
@@ -708,10 +719,11 @@ export class AgentPerformanceService {
     };
   }
 
-  async getCollections(params = {}) {
+  async getCollections(tenantId, params = {}) {
+    const scopedTenantId = this.requireTenantId(tenantId);
     const input = resolvePeriodInput(params);
     const range = buildDateRange(input);
-    const currentRecords = await this.repository.findReceivablesInRange({ ...range, search: input.search });
+    const currentRecords = await this.repository.findReceivablesInRange(scopedTenantId, { ...range, search: input.search });
     const currentMap = aggregateAgents(currentRecords);
 
     return {
@@ -721,10 +733,11 @@ export class AgentPerformanceService {
     };
   }
 
-  async getCollectionsTrend(params = {}) {
+  async getCollectionsTrend(tenantId, params = {}) {
+    const scopedTenantId = this.requireTenantId(tenantId);
     const input = resolvePeriodInput(params);
     const range = buildDateRange(input);
-    const currentRecords = await this.repository.findReceivablesInRange({ ...range, search: input.search });
+    const currentRecords = await this.repository.findReceivablesInRange(scopedTenantId, { ...range, search: input.search });
 
     return {
       range,
@@ -732,8 +745,8 @@ export class AgentPerformanceService {
     };
   }
 
-  async getAgentProfile(agentId) {
-    const agent = await this.repository.findAgentProfile(agentId);
+  async getAgentProfile(tenantId, agentId) {
+    const agent = await this.repository.findAgentProfile(this.requireTenantId(tenantId), agentId);
 
     if (!agent) {
       const error = new Error("Agent not found");
@@ -755,10 +768,10 @@ export class AgentPerformanceService {
     };
   }
 
-  async getAgentSalesHistory(agentId, params = {}) {
+  async getAgentSalesHistory(tenantId, agentId, params = {}) {
     const page = Number(params.page ?? 1);
     const limit = Number(params.limit ?? 10);
-    const result = await this.repository.findAgentSalesHistory(agentId, {
+    const result = await this.repository.findAgentSalesHistory(this.requireTenantId(tenantId), agentId, {
       page,
       limit,
       search: params.search,
@@ -789,10 +802,10 @@ export class AgentPerformanceService {
     };
   }
 
-  async getAgentCollectionHistory(agentId, params = {}) {
+  async getAgentCollectionHistory(tenantId, agentId, params = {}) {
     const page = Number(params.page ?? 1);
     const limit = Number(params.limit ?? 10);
-    const result = await this.repository.findAgentCollectionHistory(agentId, {
+    const result = await this.repository.findAgentCollectionHistory(this.requireTenantId(tenantId), agentId, {
       page,
       limit,
       search: params.search
@@ -826,10 +839,10 @@ export class AgentPerformanceService {
     };
   }
 
-  async getAgentRemittanceLedger(agentId, params = {}) {
+  async getAgentRemittanceLedger(tenantId, agentId, params = {}) {
     const page = Number(params.page ?? 1);
     const limit = Number(params.limit ?? 10);
-    const allocations = await this.repository.findAgentRemittanceAllocations(agentId, {
+    const allocations = await this.repository.findAgentRemittanceAllocations(this.requireTenantId(tenantId), agentId, {
       search: params.search
     });
     const ledger = buildRemittanceLedger(allocations);
@@ -852,10 +865,10 @@ export class AgentPerformanceService {
     };
   }
 
-  async getCollectionQueue(params = {}) {
+  async getCollectionQueue(tenantId, params = {}) {
     const page = Number(params.page ?? 1);
     const limit = Number(params.limit ?? 10);
-    const records = await this.repository.findCollectionQueueRecords({
+    const records = await this.repository.findCollectionQueueRecords(this.requireTenantId(tenantId), {
       search: params.search,
       agentId: params.agentId
     });
@@ -867,10 +880,10 @@ export class AgentPerformanceService {
     });
   }
 
-  async getRemittanceReview(params = {}) {
+  async getRemittanceReview(tenantId, params = {}) {
     const page = Number(params.page ?? 1);
     const limit = Number(params.limit ?? 10);
-    const allocations = await this.repository.findRemittanceReviewAllocations({
+    const allocations = await this.repository.findRemittanceReviewAllocations(this.requireTenantId(tenantId), {
       search: params.search
     });
 

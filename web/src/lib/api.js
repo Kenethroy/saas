@@ -1,5 +1,20 @@
 const API_BASE_URL = (import.meta.env.VITE_PLATFORM_API_BASE_URL || "http://localhost:4000").replace(/\/+$/, "");
 
+function withQuery(path, params = {}) {
+  const search = new URLSearchParams();
+
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null || value === "") {
+      continue;
+    }
+
+    search.set(key, String(value));
+  }
+
+  const query = search.toString();
+  return query ? `${path}?${query}` : path;
+}
+
 async function request(path, options = {}) {
   const headers = {
     Accept: "application/json",
@@ -59,7 +74,62 @@ export const platformApi = {
       body: input
     });
   },
+  confirmCheckout(token, input) {
+    return request("/platform/subscriptions/checkout/confirm", {
+      method: "POST",
+      token,
+      body: input
+    });
+  },
   getOnboardingStatus(token, onboardingId) {
     return request(`/platform/onboarding/${onboardingId}/status`, { token });
+  }
+};
+
+export const platformAdminApi = {
+  login(input) {
+    return request("/platform/admin/auth/login", {
+      method: "POST",
+      body: input
+    });
+  },
+  me(token) {
+    return request("/platform/admin/auth/me", { token });
+  },
+  listSubscriptions(token, params) {
+    return request(withQuery("/platform/admin/subscriptions", params), { token });
+  },
+  listOnboardingAudits(token, params) {
+    return request(withQuery("/platform/admin/onboarding-audit", params), { token });
+  },
+  getOnboardingAudit(token, onboardingId) {
+    return request(`/platform/admin/onboarding-audit/${onboardingId}`, { token });
+  },
+  getTenantBilling(token, tenantId) {
+    return request(`/platform/admin/tenants/${tenantId}/billing`, { token });
+  },
+  applySubscriptionAction(token, tenantId, input) {
+    return request(`/platform/admin/tenants/${tenantId}/subscription-action`, {
+      method: "POST",
+      token,
+      body: input
+    });
+  },
+  listPlans(token) {
+    return request("/platform/admin/plans", { token });
+  },
+  updatePlan(token, planId, input) {
+    return request(`/platform/admin/plans/${planId}`, {
+      method: "PATCH",
+      token,
+      body: input
+    });
+  },
+  updatePlanPrice(token, priceId, input) {
+    return request(`/platform/admin/plan-prices/${priceId}`, {
+      method: "PATCH",
+      token,
+      body: input
+    });
   }
 };

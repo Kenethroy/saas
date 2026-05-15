@@ -9,6 +9,7 @@ import {
   updateCustomerReturnSchema
 } from "#modules/customer-returns/customer-returns.validator";
 import { authenticate } from "#shared/middleware/auth.middleware";
+import { resolveBranch } from "#shared/middleware/branch-context.middleware";
 import { requirePermission } from "#shared/middleware/permission.middleware";
 import { validateRequest } from "#shared/middleware/validate-request.middleware";
 
@@ -18,6 +19,7 @@ const controller = new CustomerReturnsController();
 router.get(
   "/invoices/:customerId",
   authenticate,
+  resolveBranch,
   requirePermission("customerReturns.view"),
   validateRequest(customerReturnCustomerParamsSchema, "params"),
   controller.listInvoices
@@ -26,6 +28,7 @@ router.get(
 router.get(
   "/",
   authenticate,
+  resolveBranch,
   requirePermission("customerReturns.view"),
   validateRequest(listCustomerReturnsSchema, "query"),
   controller.list
@@ -34,6 +37,7 @@ router.get(
 router.get(
   "/:id",
   authenticate,
+  resolveBranch,
   requirePermission("customerReturns.view"),
   validateRequest(customerReturnParamsSchema, "params"),
   controller.getById
@@ -42,6 +46,7 @@ router.get(
 router.post(
   "/create",
   authenticate,
+  resolveBranch,
   requirePermission("customerReturns.create"),
   validateRequest(createCustomerReturnSchema),
   controller.create
@@ -50,6 +55,7 @@ router.post(
 router.patch(
   "/:id",
   authenticate,
+  resolveBranch,
   requirePermission("customerReturns.update"),
   validateRequest(customerReturnParamsSchema, "params"),
   validateRequest(updateCustomerReturnSchema),
@@ -59,6 +65,7 @@ router.patch(
 router.patch(
   "/:id/approve",
   authenticate,
+  resolveBranch,
   requirePermission("customerReturns.approve"),
   validateRequest(customerReturnParamsSchema, "params"),
   controller.approve
@@ -67,6 +74,7 @@ router.patch(
 router.patch(
   "/:id/reject",
   authenticate,
+  resolveBranch,
   requirePermission("customerReturns.approve"),
   validateRequest(customerReturnParamsSchema, "params"),
   validateRequest(rejectCustomerReturnSchema),
@@ -76,6 +84,7 @@ router.patch(
 router.delete(
   "/:id",
   authenticate,
+  resolveBranch,
   requirePermission("customerReturns.delete"),
   validateRequest(customerReturnParamsSchema, "params"),
   controller.delete
@@ -85,6 +94,7 @@ router.delete(
 router.post(
   "/",
   authenticate,
+  resolveBranch,
   requirePermission("customerReturns.create"),
   validateRequest(createCustomerReturnSchema),
   controller.create
@@ -93,6 +103,7 @@ router.post(
 router.put(
   "/:id",
   authenticate,
+  resolveBranch,
   requirePermission("customerReturns.update"),
   validateRequest(customerReturnParamsSchema, "params"),
   validateRequest(updateCustomerReturnSchema),
@@ -102,6 +113,7 @@ router.put(
 router.post(
   "/:id/approve",
   authenticate,
+  resolveBranch,
   requirePermission("customerReturns.approve"),
   validateRequest(customerReturnParamsSchema, "params"),
   controller.approve
@@ -110,6 +122,7 @@ router.post(
 router.post(
   "/:id/reject",
   authenticate,
+  resolveBranch,
   requirePermission("customerReturns.approve"),
   validateRequest(customerReturnParamsSchema, "params"),
   validateRequest(rejectCustomerReturnSchema),

@@ -138,6 +138,140 @@ export class BillingService {
     };
   }
 
+  async completeSignupPayment(payload) {
+    const onboarding = await this.onboardingRepository.findStatusByAccountId(payload.draft.accountId);
+    const paidAt = payload.paidAt instanceof Date ? payload.paidAt : new Date(payload.paidAt);
+    const currentPeriodEnd = addBillingInterval(paidAt, payload.draft.planPrice);
+
+    if (onboarding?.tenantId) {
+      const latestSubscription = onboarding.subscription?.id
+        ? { id: onboarding.subscription.id }
+        : await this.repository.findLatestTenantSubscription(onboarding.tenantId);
+
+      if (!latestSubscription?.id) {
+        throw new AppError("Provisioned subscription not found", 500);
+      }
+
+      await this.repository.attachBillingArtifacts({
+        tenantId: onboarding.tenantId,
+        subscriptionId: latestSubscription.id,
+        accountId: payload.draft.accountId,
+        provider: payload.provider,
+        planPriceId: payload.draft.planPrice.id,
+        providerSubscriptionId: payload.providerSubscriptionId ?? null,
+        providerPaymentId: payload.providerPaymentId,
+        providerCustomerId: payload.providerCustomerId ?? null,
+        providerPlanId: payload.draft.planPrice.providerPriceId ?? payload.draft.planPrice.code,
+        referenceId: payload.draft.referenceId,
+        amount: Number(payload.amount),
+        currency: String(payload.currency).toUpperCase(),
+        email: payload.draft.business.businessEmail ?? null,
+        billingCycle: payload.draft.billingCycle,
+        currentPeriodStart: paidAt,
+        currentPeriodEnd,
+        paidAt
+      });
+
+      await this.repository.activateTenantSubscriptionState(onboarding.tenantId);
+
+      if (payload.webhookEventId) {
+        await this.repository.markProviderEventStatus(payload.provider, payload.webhookEventId, "processed", {
+          tenantId: onboarding.tenantId,
+          subscriptionId: latestSubscription.id
+        });
+      }
+
+      if (payload.checkoutEventId) {
+        await this.repository.markProviderEventStatus(payload.provider, payload.checkoutEventId, "processed", {
+          tenantId: onboarding.tenantId,
+          subscriptionId: latestSubscription.id
+        });
+      }
+
+      return {
+        duplicate: false,
+        status: "processed",
+        tenantId: onboarding.tenantId,
+        subscriptionId: latestSubscription.id
+      };
+    }
+
+    await this.onboardingRepository.markPaymentConfirmed(payload.draft.accountId);
+
+    const provisioning = await this.repository.provisionTenant({
+      accountId: payload.draft.accountId,
+      planCode: payload.draft.planCode,
+      provider: payload.provider,
+      providerSubscriptionId: payload.providerSubscriptionId ?? null,
+      subscriptionStatus: "active",
+      billingCycle: payload.draft.billingCycle,
+      businessName: payload.draft.business.businessName,
+      legalName: payload.draft.business.legalName,
+      businessType: payload.draft.business.businessType,
+      phone: payload.draft.business.phone,
+      businessEmail: payload.draft.business.businessEmail,
+      address: payload.draft.business.address,
+      currencyCode: payload.draft.business.currencyCode,
+      timezone: payload.draft.business.timezone,
+      preferredSubdomain: payload.draft.business.preferredSubdomain,
+      baseDomain: env.PLATFORM_BASE_DOMAIN || null,
+      ownerUsername: payload.draft.business.ownerUsername,
+      primaryBranchName: payload.draft.business.primaryBranchName
+    });
+
+    if (!provisioning) {
+      throw new AppError("Tenant provisioning did not return a result", 500);
+    }
+
+    const latestSubscription = await this.repository.findLatestTenantSubscription(provisioning.tenantId);
+    if (!latestSubscription) {
+      throw new AppError("Provisioned subscription not found", 500);
+    }
+
+    await this.repository.attachBillingArtifacts({
+      tenantId: provisioning.tenantId,
+      subscriptionId: latestSubscription.id,
+      accountId: payload.draft.accountId,
+      provider: payload.provider,
+      planPriceId: payload.draft.planPrice.id,
+      providerSubscriptionId: payload.providerSubscriptionId ?? null,
+      providerPaymentId: payload.providerPaymentId,
+      providerCustomerId: payload.providerCustomerId ?? null,
+      providerPlanId: payload.draft.planPrice.providerPriceId ?? payload.draft.planPrice.code,
+      referenceId: payload.draft.referenceId,
+      amount: Number(payload.amount),
+      currency: String(payload.currency).toUpperCase(),
+      email: payload.draft.business.businessEmail ?? null,
+      billingCycle: payload.draft.billingCycle,
+      currentPeriodStart: paidAt,
+      currentPeriodEnd,
+      paidAt
+    });
+
+    await this.repository.activateTenantSubscriptionState(provisioning.tenantId);
+
+    if (payload.webhookEventId) {
+      await this.repository.markProviderEventStatus(payload.provider, payload.webhookEventId, "processed", {
+        tenantId: provisioning.tenantId,
+        subscriptionId: latestSubscription.id
+      });
+    }
+
+    if (payload.checkoutEventId) {
+      await this.repository.markProviderEventStatus(payload.provider, payload.checkoutEventId, "processed", {
+        tenantId: provisioning.tenantId,
+        subscriptionId: latestSubscription.id
+      });
+    }
+
+    return {
+      duplicate: false,
+      status: "processed",
+      tenantId: provisioning.tenantId,
+      subscriptionId: latestSubscription.id
+    };
+  }
+
   async checkout(accountId, payload) {
     const account = await this.requireActivePlatformAccount(accountId);
 
@@ -293,6 +427,88 @@ export class BillingService {
             }
         : null
     };
+  }
+
+  async confirmCheckout(accountId, payload) {
+    await this.requireActivePlatformAccount(accountId);
+
+    const checkoutDraft = await this.repository.findCheckoutDraftByReferenceId(payload.provider, payload.referenceId);
+    if (!checkoutDraft?.payload) {
+      throw new AppError("Checkout draft not found", 404);
+    }
+
+    const draft = checkoutDraft.payload;
+    if (Number(draft.accountId) !== Number(accountId)) {
+      throw new AppError("Forbidden", 403);
+    }
+
+    const paymentSessionId = payload.paymentSessionId ?? draft.providerSession?.paymentSessionId ?? null;
+    if (!paymentSessionId) {
+      throw new AppError("Checkout draft is missing a payment session id", 422);
+    }
+
+    if (
+      draft.providerSession?.paymentSessionId
+      && paymentSessionId !== draft.providerSession.paymentSessionId
+    ) {
+      throw new AppError("Checkout confirmation session does not match the draft", 422);
+    }
+
+    const provider = createBillingProvider(payload.provider);
+    const session = await provider.getCheckoutSession(paymentSessionId);
+
+    if (
+      session.referenceId
+      && String(session.referenceId).trim()
+      && String(session.referenceId).trim() !== String(draft.referenceId).trim()
+    ) {
+      throw new AppError("Checkout confirmation reference does not match the draft", 422);
+    }
+
+    if (payload.provider === "stripe") {
+      if (session.status !== "complete" || session.paymentStatus !== "paid") {
+        return {
+          confirmed: false,
+          status: session.status ?? "pending",
+          paymentStatus: session.paymentStatus ?? null,
+          referenceId: draft.referenceId,
+          paymentSessionId
+        };
+      }
+
+      const result = draft.flow === "renewal"
+        ? await this.completeRenewalPayment({
+            provider: "stripe",
+            draft,
+            checkoutEventId: checkoutDraft.eventId,
+            webhookEventId: null,
+            providerSubscriptionId: session.subscriptionId ?? null,
+            providerPaymentId: session.paymentSessionId,
+            providerCustomerId: session.customerId ?? null,
+            amount: session.amount ?? draft.amount,
+            currency: session.currency ?? draft.currency,
+            paidAt: new Date()
+          })
+        : await this.completeSignupPayment({
+            provider: "stripe",
+            draft,
+            checkoutEventId: checkoutDraft.eventId,
+            webhookEventId: null,
+            providerSubscriptionId: session.subscriptionId ?? null,
+            providerPaymentId: session.paymentSessionId,
+            providerCustomerId: session.customerId ?? null,
+            amount: session.amount ?? draft.amount,
+            currency: session.currency ?? draft.currency,
+            paidAt: new Date()
+          });
+
+      return {
+        confirmed: true,
+        ...result
+      };
+    }
+
+    throw new AppError(`Unsupported checkout confirmation provider: ${payload.provider}`, 422);
   }
 
   async renewTenantSubscription(auth, payload) {
@@ -526,93 +742,18 @@ export class BillingService {
         });
       }
 
-      const onboarding = await this.onboardingRepository.findStatusByAccountId(draft.accountId);
-
-      if (onboarding?.tenantId) {
-        await this.repository.markProviderEventStatus("stripe", webhookEventId, "processed", {
-          tenantId: onboarding.tenantId,
-          subscriptionId: onboarding.subscription?.id ?? null
-        });
-
-        return {
-          duplicate: false,
-          status: "processed",
-          tenantId: onboarding.tenantId,
-          subscriptionId: onboarding.subscription?.id ?? null
-        };
-      }
-
-      await this.onboardingRepository.markPaymentConfirmed(draft.accountId);
-
-      const provisioning = await this.repository.provisionTenant({
-        accountId: draft.accountId,
-        planCode: draft.planCode,
+      return this.completeSignupPayment({
         provider: "stripe",
-        providerSubscriptionId: session.subscription ?? null,
-        subscriptionStatus: "active",
-        billingCycle: draft.billingCycle,
-        businessName: draft.business.businessName,
-        legalName: draft.business.legalName,
-        businessType: draft.business.businessType,
-        phone: draft.business.phone,
-        businessEmail: draft.business.businessEmail,
-        address: draft.business.address,
-        currencyCode: draft.business.currencyCode,
-        timezone: draft.business.timezone,
-        preferredSubdomain: draft.business.preferredSubdomain,
-        baseDomain: env.PLATFORM_BASE_DOMAIN || null,
-        ownerUsername: draft.business.ownerUsername,
-        primaryBranchName: draft.business.primaryBranchName
-      });
-
-      if (!provisioning) {
-        throw new AppError("Tenant provisioning did not return a result", 500);
-      }
-
-      const latestSubscription = await this.repository.findLatestTenantSubscription(provisioning.tenantId);
-      if (!latestSubscription) {
-        throw new AppError("Provisioned subscription not found", 500);
-      }
-
-      const paidAt = new Date();
-      const currentPeriodEnd = addBillingInterval(paidAt, draft.planPrice);
-
-      await this.repository.attachBillingArtifacts({
-        tenantId: provisioning.tenantId,
-        subscriptionId: latestSubscription.id,
-        accountId: draft.accountId,
-        provider: "stripe",
-        planPriceId: draft.planPrice.id,
+        draft,
+        checkoutEventId: checkoutDraft.eventId,
+        webhookEventId,
         providerSubscriptionId: session.subscription ?? null,
         providerPaymentId: session.id,
         providerCustomerId: session.customer ?? null,
-        providerPlanId: draft.planPrice.providerPriceId ?? draft.planPrice.code,
-        referenceId: draft.referenceId,
         amount: Number((session.amount_total ?? (draft.amount * 100)) / 100),
         currency: String(session.currency ?? draft.currency).toUpperCase(),
-        email: draft.business.businessEmail ?? null,
-        billingCycle: draft.billingCycle,
-        currentPeriodStart: paidAt,
-        currentPeriodEnd,
-        paidAt
+        paidAt: new Date()
       });
-
-      await this.repository.markProviderEventStatus("stripe", webhookEventId, "processed", {
-        tenantId: provisioning.tenantId,
-        subscriptionId: latestSubscription.id
-      });
-
-      await this.repository.markProviderEventStatus("stripe", checkoutDraft.eventId, "processed", {
-        tenantId: provisioning.tenantId,
-        subscriptionId: latestSubscription.id
-      });
-
-      return {
-        duplicate: false,
-        status: "processed",
-        tenantId: provisioning.tenantId,
-        subscriptionId: latestSubscription.id
-      };
     } catch (error) {
       await this.repository.markProviderEventStatus("stripe", webhookEventId, "failed");
       throw error;
@@ -673,93 +814,18 @@ export class BillingService {
         });
       }
 
-      const onboarding = await this.onboardingRepository.findStatusByAccountId(draft.accountId);
-
-      if (onboarding?.tenantId) {
-        await this.repository.markProviderEventStatus("xendit", webhookEventId, "processed", {
-          tenantId: onboarding.tenantId,
-          subscriptionId: onboarding.subscription?.id ?? null
-        });
-
-        return {
-          duplicate: false,
-          status: "processed",
-          tenantId: onboarding.tenantId,
-          subscriptionId: onboarding.subscription?.id ?? null
-        };
-      }
-
-      await this.onboardingRepository.markPaymentConfirmed(draft.accountId);
-
-      const provisioning = await this.repository.provisionTenant({
-        accountId: draft.accountId,
-        planCode: draft.planCode,
+      return this.completeSignupPayment({
         provider: "xendit",
-        providerSubscriptionId: data.payment_session_id,
-        subscriptionStatus: "active",
-        billingCycle: draft.billingCycle,
-        businessName: draft.business.businessName,
-        legalName: draft.business.legalName,
-        businessType: draft.business.businessType,
-        phone: draft.business.phone,
-        businessEmail: draft.business.businessEmail,
-        address: draft.business.address,
-        currencyCode: draft.business.currencyCode,
-        timezone: draft.business.timezone,
-        preferredSubdomain: draft.business.preferredSubdomain,
-        baseDomain: env.PLATFORM_BASE_DOMAIN || null,
-        ownerUsername: draft.business.ownerUsername,
-        primaryBranchName: draft.business.primaryBranchName
-      });
-
-      if (!provisioning) {
-        throw new AppError("Tenant provisioning did not return a result", 500);
-      }
-
-      const latestSubscription = await this.repository.findLatestTenantSubscription(provisioning.tenantId);
-      if (!latestSubscription) {
-        throw new AppError("Provisioned subscription not found", 500);
-      }
-
-      const paidAt = data.updated ? new Date(data.updated) : new Date();
-      const currentPeriodEnd = addBillingInterval(paidAt, draft.planPrice);
-
-      await this.repository.attachBillingArtifacts({
-        tenantId: provisioning.tenantId,
-        subscriptionId: latestSubscription.id,
-        accountId: draft.accountId,
-        provider: "xendit",
-        planPriceId: draft.planPrice.id,
+        draft,
+        checkoutEventId: checkoutDraft.eventId,
+        webhookEventId,
         providerSubscriptionId: data.payment_session_id,
         providerPaymentId: resolveProviderPaymentId(data),
         providerCustomerId: data.customer_id ?? null,
-        providerPlanId: draft.planPrice.providerPriceId ?? draft.planPrice.code,
-        referenceId: draft.referenceId,
         amount: Number(data.amount ?? draft.amount),
         currency: data.currency ?? draft.currency,
-        email: draft.business.businessEmail ?? null,
-        billingCycle: draft.billingCycle,
-        currentPeriodStart: paidAt,
-        currentPeriodEnd,
-        paidAt
+        paidAt: data.updated ? new Date(data.updated) : new Date()
       });
-
-      await this.repository.markProviderEventStatus("xendit", webhookEventId, "processed", {
-        tenantId: provisioning.tenantId,
-        subscriptionId: latestSubscription.id
-      });
-
-      await this.repository.markProviderEventStatus("xendit", checkoutDraft.eventId, "processed", {
-        tenantId: provisioning.tenantId,
-        subscriptionId: latestSubscription.id
-      });
-
-      return {
-        duplicate: false,
-        status: "processed",
-        tenantId: provisioning.tenantId,
-        subscriptionId: latestSubscription.id
-      };
     } catch (error) {
       await this.repository.markProviderEventStatus("xendit", webhookEventId, "failed");
       throw error;
@@ -806,15 +872,19 @@ export class BillingService {
 
     await this.repository.activateTenantSubscriptionState(tenantId);
 
-    await this.repository.markProviderEventStatus(payload.provider, payload.webhookEventId, "processed", {
-      tenantId,
-      subscriptionId: latestSubscription.id
-    });
+    if (payload.webhookEventId) {
+      await this.repository.markProviderEventStatus(payload.provider, payload.webhookEventId, "processed", {
+        tenantId,
+        subscriptionId: latestSubscription.id
+      });
+    }
 
-    await this.repository.markProviderEventStatus(payload.provider, payload.checkoutEventId, "processed", {
-      tenantId,
-      subscriptionId: latestSubscription.id
-    });
+    if (payload.checkoutEventId) {
+      await this.repository.markProviderEventStatus(payload.provider, payload.checkoutEventId, "processed", {
+        tenantId,
+        subscriptionId: latestSubscription.id
+      });
+    }
 
     return {
       duplicate: false,

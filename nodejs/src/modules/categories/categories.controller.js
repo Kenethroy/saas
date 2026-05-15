@@ -11,6 +11,10 @@ export class CategoriesController {
     return req.auth?.user?.tenantId ?? null;
   }
 
+  getBranchId(req) {
+    return req.auth?.branch?.id ?? null;
+  }
+
   list = async (req, res, next) => {
     try {
       const result = await this.service.list(this.getTenantId(req), req.query);
@@ -42,7 +46,9 @@ export class CategoriesController {
 
   listForSelection = async (req, res, next) => {
     try {
-      const data = await this.service.listForSelection(this.getTenantId(req));
+      const data = await this.service.listForSelection(this.getTenantId(req), {
+        branchId: this.getBranchId(req)
+      });
       res.status(200).json(
         successResponse({
           message: "Category list retrieved successfully",

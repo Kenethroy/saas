@@ -9,6 +9,8 @@ export class ActivityLogsController {
   getLogs = async (req, res, next) => {
     try {
       const filters = {
+        tenantId: req.auth?.user?.tenantId,
+        branchId: req.auth?.branch?.id ?? null,
         search: req.query.search,
         action: req.query.action,
         dateFrom: req.query.date_from,
@@ -16,7 +18,9 @@ export class ActivityLogsController {
         page: req.query.page ? parseInt(req.query.page) : 1,
       };
       
-      const result = await this.service.getLogs(filters);
+      const result = await this.service.getLogs(req.auth?.user?.tenantId, filters, {
+        branchId: req.auth?.branch?.id ?? null
+      });
       res.status(200).json(
         successResponse({
           message: 'Activity logs retrieved successfully',

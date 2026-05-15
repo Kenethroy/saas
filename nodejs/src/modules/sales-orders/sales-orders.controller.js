@@ -78,7 +78,9 @@ export class SalesOrdersController {
 
   list = async (req, res, next) => {
     try {
-      const salesOrders = await this.service.list(this.getTenantId(req), req.query);
+      const salesOrders = await this.service.list(this.getTenantId(req), req.query, {
+        branchId: this.getBranchId(req)
+      });
       res.status(200).json(
         successResponse({
           message: "Sales orders retrieved successfully",
@@ -93,7 +95,9 @@ export class SalesOrdersController {
 
   listForDeliverySelection = async (req, res, next) => {
     try {
-      const data = await this.service.listForDeliverySelection(this.getTenantId(req));
+      const data = await this.service.listForDeliverySelection(this.getTenantId(req), {
+        branchId: this.getBranchId(req)
+      });
       res.status(200).json(
         successResponse({
           message: "Sales orders for delivery retrieved successfully",
